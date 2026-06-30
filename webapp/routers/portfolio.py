@@ -34,6 +34,15 @@ async def set_cash(body: CashBalanceCreate):
     return StatusResponse(status="ok", message=f"Cash balance set to ${body.amount:,.2f}")
 
 
+@router.delete("/cash/{cash_id}", response_model=StatusResponse)
+async def delete_cash(cash_id: int):
+    """Delete a cash balance entry."""
+    deleted = await svc.delete_cash(cash_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Cash entry not found")
+    return StatusResponse(status="ok", message="Cash entry deleted")
+
+
 # ── Holdings ──────────────────────────────────────────────────────────────────
 
 @router.get("/holdings")

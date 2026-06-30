@@ -51,6 +51,17 @@ async def get_cash_history(limit: int = 20) -> list[dict]:
         await db.close()
 
 
+async def delete_cash(cash_id: int) -> bool:
+    """Delete a cash balance entry by ID. Returns True if deleted."""
+    db = await get_db()
+    try:
+        cursor = await db.execute("DELETE FROM cash_balance WHERE id = ?", (cash_id,))
+        await db.commit()
+        return cursor.rowcount > 0
+    finally:
+        await db.close()
+
+
 # ── Holdings ──────────────────────────────────────────────────────────────────
 
 async def get_all_holdings() -> list[dict]:
