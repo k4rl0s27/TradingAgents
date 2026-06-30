@@ -51,6 +51,12 @@ async def get_analysis_status(run_id: int):
     return result
 
 
+@router.get("/running")
+async def get_running_analyses():
+    """Get currently running analyses (for reconnecting after page reload)."""
+    return await svc.get_running_analyses()
+
+
 @router.get("/history")
 async def get_analysis_history(
     page: int = 1,

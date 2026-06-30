@@ -41,39 +41,31 @@ export function initAnalysisForm() {
         g('an-result-rating').textContent = '';
         g('an-result-rating').className = 'rating-pill';
         results.classList.remove('hidden');
+        resultGrid.innerHTML = '';
 
         let agentCount = 0;
+        let currentEs = null;
 
-        try {
-            // Start the analysis
-            const run = await api.runAnalysis(ticker, analysisDate, analysisType, analysisDepth);
-            progText.textContent = `Analysis started for ${ticker}...`;
-            progStatus.textContent = `Run #${run.id} — streaming agent outputs`;
-
-            // Connect to SSE stream
-            const es = new EventSource(`/api/analysis/stream/${run.id}`);
+        function connectStream(runId) {
+            if (currentEs) currentEs.close();
+            const es = new EventSource(`/api/analysis/stream/${runId}`);
+            currentEs = es;
 
             es.addEventListener('agent', (evt) => {
                 const data = JSON.parse(evt.data);
                 agentCount = data.index;
                 progText.textContent = `${ticker} — ${data.agent_name} completed`;
-                progStatus.textContent = `Agent ${agentCount} done`;
+                progStatus.textContent = `Agent ${agentCount} of ~9 done`;
+            });
 
-                // Append result card in real-time
-                const card = document.createElement('div');
-                card.className = 'result-card result-card-streaming';
-                card.innerHTML = `
-                    <div class="result-card-head">
-                        <span class="result-agent">${escHtml(data.agent_name)}</span>
-                        <span class="result-type">streaming</span>
-                    </div>
-                    <div class="result-body">${escHtml(data.content).replace(/\n/g, '<br>')}</div>`;
-                resultGrid.appendChild(card);
-                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            es.addEventListener('status', (evt) => {
+                const data = JSON.parse(evt.data);
+                progStatus.textContent = data.content.substring(0, 120);
             });
 
             es.addEventListener('complete', (evt) => {
                 es.close();
+                currentEs = null;
                 const data = JSON.parse(evt.data);
                 const rating = data.rating || 'Unknown';
                 g('an-result-rating').textContent = rating;
@@ -84,12 +76,12 @@ export function initAnalysisForm() {
                 setStatus('completed');
                 submitBtn.disabled = false;
                 showToast(`${ticker} analysis complete — ${rating}`, 'success');
-                // Refresh history
                 window.loadHistory && window.loadHistory(1);
             });
 
             es.addEventListener('error', (evt) => {
                 es.close();
+                currentEs = null;
                 let errMsg = 'Analysis failed';
                 try { const d = JSON.parse(evt.data); errMsg = d.error || errMsg; } catch (_) {}
                 progText.textContent = 'Analysis failed';
@@ -99,16 +91,21 @@ export function initAnalysisForm() {
                 showToast(errMsg, 'error');
             });
 
-            // Fallback: close EventSource on generic error (connection lost, etc.)
             es.onerror = () => {
+                if (!submitBtn.disabled) return;
                 es.close();
-                if (!submitBtn.disabled) return; // already handled
-                progText.textContent = 'Connection lost';
-                progStatus.textContent = 'Stream disconnected unexpectedly';
-                setStatus('failed');
-                submitBtn.disabled = false;
-                showToast('Stream disconnected', 'error');
+                currentEs = null;
             };
+
+            return es;
+        }
+
+        try {
+            // Start the analysis
+            const run = await api.runAnalysis(ticker, analysisDate, analysisType, analysisDepth);
+            progText.textContent = `Analysis started for ${ticker}...`;
+            progStatus.textContent = `Run #${run.id} — streaming...`;
+            currentEs = connectStream(run.id);
 
         } catch (err) {
             progText.textContent = 'Analysis failed to start';
@@ -122,6 +119,97 @@ export function initAnalysisForm() {
 
     // Set default date
     fs('an-date', new Date().toISOString().split('T')[0]);
+
+    // Init chip groups
+    initChipGroup('an-depth-group', 'an-depth');
+    initChipGroup('an-type-group', 'an-type');
+}
+
+function initChipGroup(groupId, inputId) {
+    const group = g(groupId);
+    if (!group) return;
+    group.querySelectorAll('.chip:not([disabled])').forEach(chip => {
+        chip.addEventListener('click', () => {
+            group.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+            chip.classList.add('active');
+            g(inputId).value = chip.dataset.value;
+        });
+    });
+}
+
+function setChipValue(groupId, inputId, value) {
+    const group = g(groupId);
+    if (!group) return;
+    group.querySelectorAll('.chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.value === value);
+    });
+    g(inputId).value = value;
+}
+
+// Reconnect to running analyses on page load
+export async function reconnectRunningAnalysis() {
+    try {
+        const resp = await fetch('/api/analysis/running');
+        const data = await resp.json();
+        if (!data.running || !data.running.length) return;
+
+        const run = data.running[0]; // latest running analysis
+        const submitBtn = g('an-submit');
+        const progress = g('an-progress');
+        const results = g('an-results');
+        const progText = g('an-progress-text');
+        const progStatus = g('an-progress-status');
+        const resultGrid = g('an-result-grid');
+
+        g('an-ticker').value = run.ticker;
+        g('an-date').value = run.analysis_date;
+        setChipValue('an-depth-group', 'an-depth', run.analysis_depth || 'medium');
+        setChipValue('an-type-group', 'an-type', run.analysis_type || 'regular');
+        submitBtn.disabled = true;
+        progress.classList.remove('hidden');
+        results.classList.remove('hidden');
+        resultGrid.innerHTML = '';
+        g('an-result-ticker').textContent = run.ticker;
+        g('an-result-rating').textContent = '';
+        g('an-result-rating').className = 'rating-pill';
+        setStatus('running');
+        progText.textContent = `Reconnected — ${run.ticker} analysis in progress...`;
+        progStatus.textContent = `Run #${run.id} — resuming stream`;
+
+        let agentCount = 0;
+        const es = new EventSource(`/api/analysis/stream/${run.id}`);
+        es.addEventListener('agent', (evt) => {
+            const d = JSON.parse(evt.data);
+            agentCount = d.index;
+            progText.textContent = `${run.ticker} — ${d.agent_name} completed`;
+            progStatus.textContent = `Agent ${agentCount} of ~9 done`;
+        });
+        es.addEventListener('status', (evt) => {
+            const d = JSON.parse(evt.data);
+            progStatus.textContent = d.content.substring(0, 120);
+        });
+        es.addEventListener('complete', (evt) => {
+            es.close();
+            const d = JSON.parse(evt.data);
+            const rating = d.rating || 'Unknown';
+            g('an-result-rating').textContent = rating;
+            g('an-result-rating').className = `rating-pill rating-${rating.toLowerCase()}`;
+            progText.textContent = 'Analysis complete';
+            progStatus.textContent = `${agentCount} agents finished`;
+            progress.classList.add('hidden');
+            setStatus('completed');
+            submitBtn.disabled = false;
+            showToast(`${run.ticker} analysis complete — ${rating}`, 'success');
+            window.loadHistory && window.loadHistory(1);
+        });
+        es.addEventListener('error', () => {
+            es.close();
+            progText.textContent = 'Analysis failed';
+            setStatus('failed');
+            submitBtn.disabled = false;
+        });
+        es.onerror = () => { es.close(); };
+    } catch (_) { /* no running analyses */ }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -133,9 +221,8 @@ let historyPage = 1;
 export async function loadHistory(page = 1) {
     historyPage = page;
     const tickerF = fv('hist-ticker').trim();
-    const typeF = fv('hist-type');
     try {
-        const data = await api.getAnalysisHistory(page, 20, tickerF, typeF);
+        const data = await api.getAnalysisHistory(page, 20, tickerF, '');
         renderHistoryTable(data);
         renderHistoryPagination(data);
     } catch (err) { showToast('Failed to load history: ' + err.message, 'error'); }
@@ -151,7 +238,7 @@ function renderHistoryTable(data) {
     for (const run of data.items) {
         const rating = run.rating || 'Unknown';
         const depth = run.analysis_depth || 'medium';
-        const depthEmoji = { quick: '⚡', medium: '📊', deep: '🔬' }[depth] || '📊';
+        const depthIcon = { quick: 'bolt', medium: 'tune', deep: 'psychology' }[depth] || 'tune';
         const dateStr = run.analysis_date || '--';
         const createdStr = run.created_at ? new Date(run.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '--';
         const tr = document.createElement('tr');
@@ -159,7 +246,7 @@ function renderHistoryTable(data) {
         tr.innerHTML = `
             <td>#${run.id}</td>
             <td><strong>${escHtml(run.ticker)}</strong></td>
-            <td>${depthEmoji} ${escHtml(depth)}</td>
+            <td><span class="material-symbols-outlined" style="font-size:16px;color:var(--text-muted)">${depthIcon}</span></td>
             <td>${dateStr}</td>
             <td><span class="rating-pill rating-${rating.toLowerCase()}">${escHtml(rating)}</span></td>
             <td><span class="status-chip ${run.status}">${escHtml(run.status)}</span></td>
@@ -195,16 +282,12 @@ function renderHistoryPagination(data) {
 
 export function initHistoryTab() {
     const tickerFilter = g('hist-ticker');
-    const typeFilter = g('hist-type');
     if (tickerFilter) {
         let timeout;
         tickerFilter.addEventListener('input', () => {
             clearTimeout(timeout);
             timeout = setTimeout(() => loadHistory(1), 300);
         });
-    }
-    if (typeFilter) {
-        typeFilter.addEventListener('change', () => loadHistory(1));
     }
     // Expose for onclick pagination and refresh button
     window._loadHistoryPage = (page) => loadHistory(page);
