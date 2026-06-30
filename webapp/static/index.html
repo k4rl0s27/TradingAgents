@@ -126,14 +126,6 @@
                             <span class="material-symbols-outlined search-icon">search</span>
                             <input type="text" id="hist-ticker" placeholder="Filter by ticker...">
                         </div>
-                        <div class="filter-search">
-                            <span class="material-symbols-outlined search-icon">filter_list</span>
-                            <select id="hist-type">
-                                <option value="">All Types</option>
-                                <option value="regular">Regular</option>
-                                <option value="options">Options</option>
-                            </select>
-                        </div>
                         <button class="btn-icon-only" id="btnHistRefresh" onclick="window.loadHistory(1)" title="Refresh history">
                             <span class="material-symbols-outlined">refresh</span>
                         </button>
@@ -176,18 +168,35 @@
                         </div>
                         <div class="form-field">
                             <label for="an-depth">Analysis Depth</label>
-                            <select id="an-depth">
-                                <option value="quick">⚡ Quick</option>
-                                <option value="medium" selected>📊 Medium</option>
-                                <option value="deep">🔬 Deep</option>
-                            </select>
+                            <div class="chip-group" id="an-depth-group">
+                                <button class="chip" data-value="quick" type="button">
+                                    <span class="material-symbols-outlined">bolt</span>
+                                    <span>Quick</span>
+                                </button>
+                                <button class="chip active" data-value="medium" type="button">
+                                    <span class="material-symbols-outlined">tune</span>
+                                    <span>Medium</span>
+                                </button>
+                                <button class="chip" data-value="deep" type="button">
+                                    <span class="material-symbols-outlined">psychology</span>
+                                    <span>Deep</span>
+                                </button>
+                            </div>
+                            <input type="hidden" id="an-depth" value="medium">
                         </div>
                         <div class="form-field">
                             <label for="an-type">Analysis Type</label>
-                            <select id="an-type">
-                                <option value="regular">Regular</option>
-                                <option value="options" disabled>Options (Phase 2)</option>
-                            </select>
+                            <div class="chip-group" id="an-type-group">
+                                <button class="chip active" data-value="regular" type="button">
+                                    <span class="material-symbols-outlined">trending_up</span>
+                                    <span>Regular</span>
+                                </button>
+                                <button class="chip" data-value="options" type="button" disabled>
+                                    <span class="material-symbols-outlined">contract</span>
+                                    <span>Options</span>
+                                </button>
+                            </div>
+                            <input type="hidden" id="an-type" value="regular">
                         </div>
                         <button type="submit" class="btn-primary btn-full" id="an-submit">
                             <span class="material-symbols-outlined">play_arrow</span>

@@ -5,7 +5,7 @@
  */
 
 import { loadDashboard, initCashForm, initHoldingForm, initTxForm, loadPortfolioManager } from './portfolio.js';
-import { initAnalysisForm, loadHistory, initHistoryTab } from './analysis.js';
+import { initAnalysisForm, loadHistory, initHistoryTab, reconnectRunningAnalysis } from './analysis.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Toast
@@ -56,7 +56,7 @@ export function switchView(name) {
     // Load view data
     switch (name) {
         case 'dashboard': loadDashboard(); break;
-        case 'analysis': loadHistory(); break;
+        case 'analysis': loadHistory(); reconnectRunningAnalysis(); break;
         case 'portfolio': loadPortfolioManager(); break;
     }
 

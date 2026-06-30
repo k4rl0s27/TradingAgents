@@ -115,9 +115,24 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
         # Run the graph with streaming in a thread, pushing events to the queue
         loop = asyncio.get_event_loop()
 
+        # Map state keys to display names and track which ones we've emitted
+        _REPORT_KEYS = [
+            ("market_report", "Market Analyst"),
+            ("sentiment_report", "Sentiment Analyst"),
+            ("news_report", "News Analyst"),
+            ("fundamentals_report", "Fundamentals Analyst"),
+        ]
+        _DEBATE_KEYS = [
+            ("investment_debate_state", "Bull/Bear Debate"),
+            ("risk_debate_state", "Risk Debate"),
+        ]
+        _FINAL_KEYS = [
+            ("trader_investment_plan", "Trader"),
+            ("final_trade_decision", "Portfolio Manager"),
+        ]
+
         def _stream_and_collect():
-            """Run graph.stream() and push each node output to the queue."""
-            # Recreate the graph steps inline (same as propagate without checkpoint)
+            """Run graph.stream() and push agent outputs as state keys become populated."""
             past_context = ta.memory_log.get_past_context(run["ticker"])
             instrument_context = ta.resolve_instrument_context(run["ticker"], "stock")
             init_state = ta.propagator.create_initial_state(
@@ -129,18 +144,48 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
             args = ta.propagator.get_graph_args()
 
             final_state = {}
+            emitted = set()
+
             for chunk in ta.graph.stream(init_state, **args):
                 final_state.update(chunk)
-                # Extract the node name and output from the chunk
-                for node_name, node_output in chunk.items():
-                    if node_name in ("__start__", "__end__", "tools"):
+
+                # Emit a heartbeat every few chunks so the frontend knows we're alive
+                # Check all report keys for newly populated content
+                for state_key, agent_name in _REPORT_KEYS + _DEBATE_KEYS + _FINAL_KEYS:
+                    if state_key in emitted:
                         continue
-                    agent_display = _node_to_agent(node_name)
-                    content = _extract_chunk_content(node_output, node_name)
+                    val = final_state.get(state_key)
+                    if not val:
+                        continue
+                    # For dict-based state, check if it has meaningful content
+                    content = None
+                    if isinstance(val, str) and val.strip():
+                        content = val
+                    elif isinstance(val, dict):
+                        # Investment debate: look for bull_history, bear_history, or history
+                        for sub in ("bull_history", "bear_history", "history", "aggressive_history"):
+                            if val.get(sub) and str(val[sub]).strip():
+                                content = str(val[sub])
+                                break
+                        if not content and val.get("current_response"):
+                            content = str(val["current_response"])
                     if content:
+                        emitted.add(state_key)
                         loop.call_soon_threadsafe(
                             queue.put_nowait,
-                            {"type": "agent", "agent_name": agent_display, "content": str(content)[:3000]},
+                            {"type": "agent", "agent_name": agent_name, "content": str(content)[:3000]},
+                        )
+
+                # Also emit the latest message content for progress updates
+                msgs = final_state.get("messages", [])
+                if msgs:
+                    last = msgs[-1]
+                    txt = getattr(last, "content", "")
+                    if txt and hasattr(last, "tool_calls") and getattr(last, "tool_calls", None):
+                        # This is a tool call — show as status update
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            {"type": "status", "content": str(txt)[:500]},
                         )
 
             # Push completion event
@@ -207,23 +252,29 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
             _event_queues.pop(run_id, None)
 
 
-def _extract_chunk_content(node_output: dict, node_name: str) -> str | None:
+def _extract_chunk_content(node_output, node_name: str) -> str | None:
     """Extract meaningful content from a streaming chunk for the given node."""
-    if not isinstance(node_output, dict):
-        return None
-    # Look for messages in the node output
-    messages = node_output.get("messages", [])
-    if messages:
-        last_msg = messages[-1]
+    # node_output is a list of LangGraph messages, or a dict with state
+    if isinstance(node_output, list):
+        if not node_output:
+            return None
+        last_msg = node_output[-1]
         content = getattr(last_msg, "content", None)
         if content:
             return str(content)
-    # Try common state keys
-    for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report",
-                 "investment_plan", "trader_investment_plan", "final_trade_decision"):
-        val = node_output.get(key)
-        if val:
-            return str(val)[:3000]
+        return None
+    if isinstance(node_output, dict):
+        messages = node_output.get("messages", [])
+        if messages:
+            last_msg = messages[-1]
+            content = getattr(last_msg, "content", None)
+            if content:
+                return str(content)
+        for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report",
+                     "investment_plan", "trader_investment_plan", "final_trade_decision"):
+            val = node_output.get(key)
+            if val:
+                return str(val)[:3000]
     return None
 
 
@@ -237,7 +288,7 @@ async def stream_analysis_events(run_id: int):
     agent_count = 0
     while True:
         try:
-            event = await asyncio.wait_for(queue.get(), timeout=60.0)
+            event = await asyncio.wait_for(queue.get(), timeout=600.0)
         except asyncio.TimeoutError:
             yield f"event: error\ndata: {{\"error\": \"Stream timed out\"}}\n\n"
             return
@@ -254,6 +305,10 @@ async def stream_analysis_events(run_id: int):
                 "index": agent_count,
             })
             yield f"event: agent\ndata: {data}\n\n"
+        elif event["type"] == "status":
+            import json
+            data = json.dumps({"content": event["content"]})
+            yield f"event: status\ndata: {data}\n\n"
         elif event["type"] == "complete":
             import json
             data = json.dumps({
@@ -314,6 +369,19 @@ async def get_analysis_status(run_id: int) -> dict:
         if not row:
             return {"error": "Analysis run not found"}
         return dict(row)
+    finally:
+        await db.close()
+
+
+async def get_running_analyses() -> dict:
+    """Get analyses that are currently running, newest first."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM analysis_runs WHERE status = 'running' ORDER BY created_at DESC LIMIT 5"
+        )
+        rows = await cursor.fetchall()
+        return {"running": [dict(r) for r in rows]}
     finally:
         await db.close()
 

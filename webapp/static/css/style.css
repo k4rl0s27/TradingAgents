@@ -401,6 +401,84 @@ html.dark .orders-table tbody tr.clickable:hover { background: var(--surface-var
 
 td.num, th.num { font-variant-numeric: tabular-nums; text-align: right; }
 
+/* ── Chip Group ───────────────────────────────────────────────────── */
+.chip-group {
+    display: flex;
+    gap: 6px;
+}
+
+.chip-group .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--surface);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition);
+    line-height: 1;
+}
+
+.chip-group .chip:hover { background: var(--surface-variant); }
+
+.chip-group .chip.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+html.dark .chip-group .chip.active { color: #1e1e1e; }
+
+.chip-group .chip .material-symbols-outlined { font-size: 18px; }
+
+/* ── Styled Select ────────────────────────────────────────────────── */
+.select-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.select-icon {
+    position: absolute;
+    left: 12px;
+    font-size: 20px;
+    color: var(--text-muted);
+    pointer-events: none;
+    z-index: 1;
+}
+
+.select-wrap select {
+    width: 100%;
+    padding: 10px 36px 10px 40px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: inherit;
+    font-size: 14px;
+    outline: none;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2380868b' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    transition: border-color var(--transition);
+}
+
+.select-wrap select:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(26,115,232,.12);
+}
+
+html.dark .select-wrap select:focus {
+    box-shadow: 0 0 0 3px rgba(138,180,248,.25);
+}
+
 /* ── Pagination ───────────────────────────────────────────────────── */
 .pagination {
     display: flex;
