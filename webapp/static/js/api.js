@@ -56,8 +56,8 @@ export const deleteTransaction = (id) => request(`/api/portfolio/transactions/${
 
 // ── Analysis ─────────────────────────────────────────────────────────────
 
-export const runAnalysis = (ticker, analysisDate, analysisType = 'regular') =>
-    request('/api/analysis/run', { method: 'POST', body: JSON.stringify({ ticker, analysis_date: analysisDate, analysis_type: analysisType }) });
+export const runAnalysis = (ticker, analysisDate, analysisType = 'regular', analysisDepth = 'medium') =>
+    request('/api/analysis/run', { method: 'POST', body: JSON.stringify({ ticker, analysis_date: analysisDate, analysis_type: analysisType, analysis_depth: analysisDepth }) });
 
 export const getAnalysisStatus = (runId) => request(`/api/analysis/status/${runId}`);
 export const getAnalysisDetail = (runId) => request(`/api/analysis/${runId}`);

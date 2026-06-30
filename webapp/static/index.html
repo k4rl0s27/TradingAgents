@@ -145,6 +145,7 @@
                             <tr>
                                 <th>ID</th>
                                 <th>Ticker</th>
+                                <th>Depth</th>
                                 <th class="num">Date</th>
                                 <th>Rating</th>
                                 <th>Status</th>
@@ -153,7 +154,7 @@
                             </tr>
                         </thead>
                         <tbody id="history-tbody">
-                            <tr><td colspan="7" class="empty-state">No analysis history yet.</td></tr>
+                            <tr><td colspan="8" class="empty-state">No analysis history yet.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -172,6 +173,14 @@
                         <div class="form-field">
                             <label for="an-date">Analysis Date</label>
                             <input type="date" id="an-date" required>
+                        </div>
+                        <div class="form-field">
+                            <label for="an-depth">Analysis Depth</label>
+                            <select id="an-depth">
+                                <option value="quick">⚡ Quick</option>
+                                <option value="medium" selected>📊 Medium</option>
+                                <option value="deep">🔬 Deep</option>
+                            </select>
                         </div>
                         <div class="form-field">
                             <label for="an-type">Analysis Type</label>

@@ -96,6 +96,7 @@ class PortfolioSummary(BaseModel):
 class AnalysisRunRequest(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=20)
     analysis_type: str = Field(default="regular", pattern="^(regular|options)$")
+    analysis_depth: str = Field(default="medium", pattern="^(quick|medium|deep)$", description="Analysis depth: quick, medium, or deep")
     analysis_date: str = Field(..., description="Target analysis date YYYY-MM-DD")
 
 
