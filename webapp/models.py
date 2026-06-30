@@ -123,6 +123,16 @@ class AnalysisResultItem(BaseModel):
 class AnalysisDetailResponse(BaseModel):
     run: AnalysisRunResponse
     results: list[AnalysisResultItem]
+
+
+# ── Auth / User ───────────────────────────────────────────────────────────────
+
+class UserResponse(BaseModel):
+    id: int
+    sub: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    is_initialized: bool
     options: Optional[dict] = None  # Phase 2
 
 

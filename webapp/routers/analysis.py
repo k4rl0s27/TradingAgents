@@ -2,20 +2,22 @@
 Analysis API routes — run analyses, view history, stream results.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 
 from ..models import AnalysisRunRequest, AnalysisRunResponse, StatusResponse
+from ..routers.auth import get_current_user
 from ..services import analysis_service as svc
 
-router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+router = APIRouter(prefix="/api/analysis", tags=["analysis"], dependencies=[Depends(get_current_user)])
 
 
 @router.post("/run", response_model=AnalysisRunResponse)
-async def run_analysis(body: AnalysisRunRequest):
+async def run_analysis(body: AnalysisRunRequest, user: dict = Depends(get_current_user)):
     """Start a new analysis. Stream progress via /stream/{id}."""
     try:
         run_id = await svc.start_analysis(
+            user_id=user["id"],
             ticker=body.ticker,
             analysis_date=body.analysis_date,
             analysis_type=body.analysis_type,
@@ -52,9 +54,9 @@ async def get_analysis_status(run_id: int):
 
 
 @router.get("/running")
-async def get_running_analyses():
+async def get_running_analyses(user: dict = Depends(get_current_user)):
     """Get currently running analyses (for reconnecting after page reload)."""
-    return await svc.get_running_analyses()
+    return await svc.get_running_analyses(user["id"])
 
 
 @router.get("/history")
@@ -63,9 +65,11 @@ async def get_analysis_history(
     per_page: int = 20,
     ticker: str = "",
     type: str = "",
+    user: dict = Depends(get_current_user),
 ):
     """Get paginated analysis history. Filter by ticker and/or type."""
     return await svc.get_analysis_history(
+        user_id=user["id"],
         page=page,
         per_page=per_page,
         ticker_filter=ticker,

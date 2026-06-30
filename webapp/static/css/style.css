@@ -1133,3 +1133,226 @@ body.drawer-open { overflow: hidden; }
     .nav-item { padding: 8px 12px; font-size: 13px; }
     .nav-item span:last-child { display: none; }
 }
+
+/* ── Setup Wizard ────────────────────────────────────────────────────
+   MD3 single-card layout. All providers visible (no scroll). When a
+   provider is selected the card expands with a decelerated animation
+   to reveal model & API-key fields.                                  */
+.setup-wizard {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    padding: 40px 24px;
+}
+
+.setup-card {
+    background: var(--surface);
+    border-radius: 28px;
+    padding: 32px;
+    max-width: 640px;
+    width: 100%;
+    box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 32px rgba(0,0,0,.16);
+    transition: box-shadow 0.35s cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+.setup-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.setup-logo {
+    font-size: 36px;
+    color: var(--accent);
+    flex-shrink: 0;
+}
+
+.setup-title {
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 26px;
+    color: var(--text);
+    margin: 0;
+}
+
+.setup-subtitle {
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--text-secondary);
+    margin: 1px 0 0 0;
+}
+
+/* ── Section label ───────────────────────────────────────────────── */
+.setup-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+/* ── Provider grid ──────────────────────────────────────────────── */
+.provider-scroll {
+    margin-bottom: 0;
+}
+
+.provider-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+}
+
+.provider-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: background .12s, border-color .12s;
+    text-align: left;
+    font-family: inherit;
+}
+
+.provider-card:hover {
+    border-color: var(--accent);
+    background: var(--accent-light);
+}
+
+.provider-card.selected {
+    border-color: var(--accent);
+    background: var(--accent-light);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.provider-name {
+    font-weight: 500;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--text);
+}
+
+.provider-env {
+    font-size: 10px;
+    line-height: 14px;
+    color: var(--text-muted);
+    margin-top: 1px;
+}
+
+/* ── Config section — animated reveal ─────────────────────────────
+   JS sets inline max-height for smooth expansion; CSS handles the
+   transition curve.  Collapsed by default via overflow + zero height. */
+#setupConfig {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.4s cubic-bezier(0.2, 0, 0, 1);
+}
+
+#setupConfig.visible {
+    /* max-height set via JS to scrollHeight */
+}
+
+.setup-fields {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+    padding-top: 20px;  /* spacing from provider grid */
+}
+
+#setupConfig .form-field {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+#setupConfig .form-field label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: .3px;
+}
+
+#setupConfig select,
+#setupConfig input[type="password"],
+#setupConfig input[type="text"] {
+    width: 100%;
+    height: 38px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--surface);
+    color: var(--text);
+    transition: border-color .15s, box-shadow .15s;
+}
+
+#setupConfig select:focus,
+#setupConfig input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.form-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 1px;
+}
+
+.custom-model-input {
+    margin-top: 4px;
+}
+
+/* ── User Chip ─────────────────────────────────────────────────────── */
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    padding: 4px 8px;
+    border-radius: 20px;
+    background: var(--surface-variant);
+}
+
+.user-chip .material-symbols-outlined {
+    font-size: 18px;
+}
+
+/* ── Setup Wizard responsive ──────────────────────────────────── */
+@media (max-width: 600px) {
+    .setup-card { padding: 24px 20px; }
+    .setup-fields { grid-template-columns: 1fr; }
+    .provider-grid { grid-template-columns: repeat(2, 1fr); }
+    #setupConfig.visible { max-height: 500px; }
+}
+
+/* ── Setup Wizard responsive ──────────────────────────────────── */
+@media (max-width: 700px) {
+    .setup-body {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .provider-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .provider-scroll {
+        max-height: 240px;
+    }
+    .setup-card {
+        padding: 24px 20px;
+    }
+}

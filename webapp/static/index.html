@@ -18,6 +18,13 @@
             <h1 class="app-title">TradingAgents</h1>
         </div>
         <div class="top-bar-right">
+            <span class="user-chip hidden" id="userChip" title="Current user">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span id="userName">—</span>
+            </span>
+            <button class="btn-icon-only hidden" id="btnLogout" onclick="window.logout()" title="Logout">
+                <span class="material-symbols-outlined">logout</span>
+            </button>
             <span class="status-chip" id="app-status">Ready</span>
             <button class="btn-icon-only" id="btnDarkMode" onclick="toggleDarkMode()" title="Toggle dark mode">
                 <span class="material-symbols-outlined">dark_mode</span>
@@ -44,7 +51,7 @@
     </nav>
 
     <!-- ═══ Scrollable view area ═══ -->
-    <div class="view-scroll">
+    <div class="view-scroll" id="view-scroll">
 
     <!-- ── Dashboard View ── -->
     <main class="main-content" id="view-dashboard">
@@ -349,10 +356,54 @@
 
     </div><!-- end view-scroll -->
 
+    <!-- ═══ Setup Wizard ═══ -->
+    <div class="setup-wizard hidden" id="setupWizard">
+        <div class="setup-card">
+            <div class="setup-header">
+                <span class="setup-logo material-symbols-outlined">show_chart</span>
+                <div>
+                    <h1 class="setup-title">Welcome to TradingAgents</h1>
+                    <p class="setup-subtitle">Configure your AI provider to get started.</p>
+                </div>
+            </div>
+
+            <label class="setup-label">Provider</label>
+            <div id="setupStep1Body" class="provider-scroll">
+                <div class="spinner"></div>
+                <p>Loading providers...</p>
+            </div>
+            <input type="hidden" id="setupSelectedProvider" value="">
+
+            <div id="setupConfig" style="max-height:0;overflow:hidden">
+                <div class="setup-fields">
+                    <div class="form-field">
+                        <label for="setupDeepModel">Deep-thinking model</label>
+                        <select id="setupDeepModel"><option value="">Select a model</option></select>
+                        <input type="text" class="custom-model-input hidden" id="setupDeepModelCustom" placeholder="Custom model ID">
+                    </div>
+                    <div class="form-field">
+                        <label for="setupQuickModel">Quick-thinking model</label>
+                        <select id="setupQuickModel"><option value="">Select a model</option></select>
+                        <input type="text" class="custom-model-input hidden" id="setupQuickModelCustom" placeholder="Custom model ID">
+                    </div>
+                    <div class="form-field">
+                        <label for="setupApiKey">API Key</label>
+                        <input type="password" id="setupApiKey" placeholder="sk-..." required>
+                        <span class="form-hint">Encrypted at rest &mdash; never logged.</span>
+                    </div>
+                </div>
+                <button class="btn-primary btn-full" id="setupStep3Button" onclick="window.submitSetup()" disabled>
+                    <span id="setupSubmitBtn">Complete Setup</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- ═══ Toast ═══ -->
     <div class="toast hidden" id="toast"></div>
 
     <!-- ═══ Scripts ═══ -->
+    <script type="module" src="/static/js/auth.js"></script>
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

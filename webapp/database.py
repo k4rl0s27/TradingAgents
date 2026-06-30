@@ -11,7 +11,7 @@ DB_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DB_DIR / "trading.db"
 
 # Schema version tracking table
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -48,21 +48,52 @@ CREATE TABLE IF NOT EXISTS schema_version (
     version INTEGER PRIMARY KEY
 );
 
+-- Users (auto-provisioned from OIDC)
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    oidc_sub TEXT NOT NULL UNIQUE,
+    email TEXT,
+    display_name TEXT,
+    is_initialized INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Per-user LLM provider settings (API key encrypted at rest)
+CREATE TABLE IF NOT EXISTS user_settings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    llm_provider TEXT NOT NULL,
+    deep_think_llm TEXT,
+    quick_think_llm TEXT,
+    backend_url TEXT,
+    encrypted_api_key TEXT NOT NULL,
+    temperature REAL,
+    google_thinking_level TEXT,
+    openai_reasoning_effort TEXT,
+    anthropic_effort TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Current portfolio holdings (manual entry)
 CREATE TABLE IF NOT EXISTS holdings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticker TEXT NOT NULL UNIQUE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ticker TEXT NOT NULL,
     asset_type TEXT NOT NULL DEFAULT 'stock',
     quantity REAL NOT NULL DEFAULT 0,
     avg_cost REAL,
     sector TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(user_id, ticker)
 );
 
 -- Record of all buy/sell executions
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     ticker TEXT NOT NULL,
     transaction_type TEXT NOT NULL CHECK(transaction_type IN ('buy', 'sell')),
     quantity REAL NOT NULL,
@@ -77,6 +108,7 @@ CREATE TABLE IF NOT EXISTS transactions (
 -- Cash balance history
 CREATE TABLE IF NOT EXISTS cash_balance (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     amount REAL NOT NULL,
     date TEXT NOT NULL,
     notes TEXT,
@@ -86,6 +118,7 @@ CREATE TABLE IF NOT EXISTS cash_balance (
 -- Analysis runs (each invocation of the agent graph)
 CREATE TABLE IF NOT EXISTS analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     ticker TEXT NOT NULL,
     analysis_type TEXT NOT NULL DEFAULT 'regular' CHECK(analysis_type IN ('regular', 'options')),
     analysis_depth TEXT NOT NULL DEFAULT 'medium' CHECK(analysis_depth IN ('quick', 'medium', 'deep')),
@@ -113,6 +146,7 @@ CREATE TABLE IF NOT EXISTS analysis_results (
 -- Index for fast history lookups
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_ticker ON analysis_runs(ticker);
 CREATE INDEX IF NOT EXISTS idx_analysis_runs_created ON analysis_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_analysis_runs_user ON analysis_runs(user_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_results_run ON analysis_results(analysis_run_id);
 
 -- Options-specific analysis data (Phase 2)
