@@ -24,6 +24,13 @@ def create_trader(llm):
         company_name = state["company_of_interest"]
         instrument_context = get_instrument_context_from_state(state)
         investment_plan = state["investment_plan"]
+        portfolio_context = state.get("portfolio_context", "")
+
+        portfolio_section = (
+            f"\n\n**Your Current Portfolio:**\n{portfolio_context}\n"
+            if portfolio_context
+            else ""
+        )
 
         messages = [
             {
@@ -31,7 +38,9 @@ def create_trader(llm):
                 "content": (
                     "You are a trading agent analyzing market data to make investment decisions. "
                     "Based on your analysis, provide a specific recommendation to buy, sell, or hold. "
-                    "Anchor your reasoning in the analysts' reports and the research plan."
+                    "Anchor your reasoning in the analysts' reports and the research plan. "
+                    "When a real portfolio is provided, consider existing positions, "
+                    "sector concentration, and available cash when sizing your recommendation."
                     + get_language_instruction()
                 ),
             },
@@ -42,7 +51,8 @@ def create_trader(llm):
                     f"plan tailored for {company_name}. {instrument_context} This plan incorporates "
                     f"insights from current technical market trends, macroeconomic indicators, and "
                     f"social media sentiment. Use this plan as a foundation for evaluating your next "
-                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}\n\n"
+                    f"trading decision.\n\nProposed Investment Plan: {investment_plan}"
+                    f"{portfolio_section}\n\n"
                     f"Leverage these insights to make an informed and strategic decision."
                 ),
             },

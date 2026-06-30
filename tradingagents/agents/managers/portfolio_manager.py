@@ -33,9 +33,17 @@ def create_portfolio_manager(llm):
         trader_plan = state["trader_investment_plan"]
 
         past_context = state.get("past_context", "")
+        portfolio_context = state.get("portfolio_context", "")
+
         lessons_line = (
             f"- Lessons from prior decisions and outcomes:\n{past_context}\n"
             if past_context
+            else ""
+        )
+
+        portfolio_line = (
+            f"\n**Your Current Portfolio:**\n{portfolio_context}\n"
+            if portfolio_context
             else ""
         )
 
@@ -55,13 +63,13 @@ def create_portfolio_manager(llm):
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
-{lessons_line}
+{lessons_line}{portfolio_line}
 **Risk Analysts Debate History:**
 {history}
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts.{get_language_instruction()}"""
+Be decisive and ground every conclusion in specific evidence from the analysts. When a real portfolio is provided, factor in existing positions, sector concentration, available cash, and how this trade would affect overall portfolio risk.{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

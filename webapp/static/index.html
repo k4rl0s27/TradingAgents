@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en" class="mw-loading">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TradingAgents Portfolio</title>
+
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,100..1000&family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+
+    <script type="importmap">
+    { "imports": { "@material/web/": "https://esm.run/@material/web@2.4.0/" } }
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="/static/css/style.css">
+
+    <style>
+        html.mw-loading body { opacity: 0; }
+        html.mw-ready body { opacity: 1; transition: opacity 0.15s ease; }
+    </style>
+
+    <script type="module">
+        import '@material/web/all.js';
+        import { styles as typescaleStyles } from '@material/web/typography/md-typescale-styles.js';
+        document.adoptedStyleSheets.push(typescaleStyles.styleSheet);
+        await Promise.all([
+            customElements.whenDefined('md-filled-button'),
+            customElements.whenDefined('md-filled-text-field'),
+            customElements.whenDefined('md-tabs'),
+        ]);
+        document.documentElement.classList.replace('mw-loading', 'mw-ready');
+    </script>
+</head>
+<body>
+
+<header class="app-bar">
+    <div class="app-bar-start">
+        <h1 class="app-bar-title">TradingAgents</h1>
+        <span class="app-bar-subtitle">Portfolio Intelligence</span>
+    </div>
+    <div class="app-bar-end">
+        <span class="status-chip" id="app-status">Ready</span>
+    </div>
+</header>
+
+<nav class="tab-bar">
+    <md-tabs id="nav-tabs">
+        <md-primary-tab id="tab-dashboard" active>
+            <md-icon slot="icon">dashboard</md-icon>
+            Dashboard
+        </md-primary-tab>
+        <md-primary-tab id="tab-analysis">
+            <md-icon slot="icon">query_stats</md-icon>
+            Analysis
+        </md-primary-tab>
+        <md-primary-tab id="tab-history">
+            <md-icon slot="icon">history</md-icon>
+            History
+        </md-primary-tab>
+        <md-primary-tab id="tab-portfolio">
+            <md-icon slot="icon">account_balance</md-icon>
+            Portfolio
+        </md-primary-tab>
+    </md-tabs>
+</nav>
+
+<main class="content" id="main-content">
+
+<!-- ═══════════════ DASHBOARD ═══════════════ -->
+<section class="tab-panel active" id="panel-dashboard">
+    <div class="summary-grid" id="summary-grid">
+        <div class="metric-card"><span class="metric-label">Total Value</span><span class="metric-value" id="sum-total">--</span></div>
+        <div class="metric-card"><span class="metric-label">Cash</span><span class="metric-value" id="sum-cash">--</span></div>
+        <div class="metric-card"><span class="metric-label">Holdings Value</span><span class="metric-value" id="sum-holdings">--</span></div>
+        <div class="metric-card"><span class="metric-label">Positions</span><span class="metric-value" id="sum-positions">--</span></div>
+    </div>
+    <div class="dash-grid">
+        <div class="surface-card">
+            <h2 class="card-heading">Allocation</h2>
+            <div class="chart-wrap"><canvas id="allocation-chart"></canvas></div>
+            <div class="empty-state hidden" id="chart-empty"><md-icon>pie_chart</md-icon><p>No holdings to display</p></div>
+        </div>
+        <div class="surface-card">
+            <h2 class="card-heading">Holdings</h2>
+            <div class="table-wrap">
+                <table class="md-table" id="holdings-table">
+                    <thead><tr><th>Ticker</th><th class="num">Shares</th><th class="num">Avg Cost</th><th class="num">Est. Value</th><th class="num">Weight</th></tr></thead>
+                    <tbody id="holdings-tbody"></tbody>
+                </table>
+            </div>
+            <div class="empty-state hidden" id="holdings-empty"><md-icon>inventory_2</md-icon><p>No holdings yet</p></div>
+        </div>
+    </div>
+    <div class="surface-card">
+        <h2 class="card-heading">Recent Transactions</h2>
+        <div class="table-wrap">
+            <table class="md-table" id="tx-table">
+                <thead><tr><th>Date</th><th class="num">Type</th><th>Ticker</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Total</th></tr></thead>
+                <tbody id="tx-tbody"></tbody>
+            </table>
+        </div>
+        <div class="empty-state hidden" id="tx-empty"><md-icon>receipt_long</md-icon><p>No transactions recorded</p></div>
+    </div>
+</section>
+
+<!-- ═══════════════ ANALYSIS ═══════════════ -->
+<section class="tab-panel" id="panel-analysis">
+    <div class="surface-card">
+        <h2 class="card-heading">Run New Analysis</h2>
+        <form id="analysis-form" class="v-form">
+            <md-filled-text-field id="an-ticker" label="Ticker Symbol" placeholder="e.g. NVDA" required></md-filled-text-field>
+            <md-filled-select id="an-type" label="Analysis Type">
+                <md-select-option value="regular"><div slot="headline">Regular Analysis</div></md-select-option>
+                <md-select-option value="options" disabled><div slot="headline">Options Analysis (Phase 2)</div></md-select-option>
+            </md-filled-select>
+            <md-filled-text-field id="an-date" label="Analysis Date" type="date" required></md-filled-text-field>
+            <md-filled-button type="submit" id="an-submit" trailing-icon>
+                Run Analysis<md-icon slot="icon">play_arrow</md-icon>
+            </md-filled-button>
+        </form>
+        <div class="progress-block hidden" id="an-progress">
+            <md-circular-progress indeterminate></md-circular-progress>
+            <div class="progress-info"><span id="an-progress-text">Analysis in progress...</span><span class="helper-text" id="an-progress-status"></span></div>
+        </div>
+        <div class="results-block hidden" id="an-results">
+            <div class="results-head"><h3 id="an-result-ticker"></h3><span class="rating-pill" id="an-result-rating"></span></div>
+            <div class="results-list" id="an-result-grid"></div>
+        </div>
+    </div>
+</section>
+
+<!-- ═══════════════ HISTORY ═══════════════ -->
+<section class="tab-panel" id="panel-history">
+    <div class="surface-card">
+        <h2 class="card-heading">Analysis History</h2>
+        <div class="filter-bar">
+            <md-filled-text-field id="hist-ticker-filter" label="Filter by ticker" style="max-width:200px"></md-filled-text-field>
+            <md-filled-select id="hist-type-filter" label="Type" style="max-width:160px">
+                <md-select-option value=""><div slot="headline">All Types</div></md-select-option>
+                <md-select-option value="regular"><div slot="headline">Regular</div></md-select-option>
+                <md-select-option value="options"><div slot="headline">Options</div></md-select-option>
+            </md-filled-select>
+            <md-icon-button id="hist-refresh" aria-label="Refresh"><md-icon>refresh</md-icon></md-icon-button>
+        </div>
+        <div class="table-wrap">
+            <table class="md-table" id="hist-table">
+                <thead><tr><th>Date</th><th>Ticker</th><th>Type</th><th>Rating</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="hist-tbody"></tbody>
+            </table>
+        </div>
+        <div class="paginator" id="hist-pagination"></div>
+    </div>
+</section>
+
+<!-- ═══════════════ PORTFOLIO ═══════════════ -->
+<section class="tab-panel" id="panel-portfolio">
+    <!-- Cash -->
+    <div class="surface-card">
+        <div class="card-head-row">
+            <h2 class="card-heading">Cash Balance</h2>
+            <span class="cash-display" id="cash-display">$0.00</span>
+        </div>
+        <form id="cash-form" class="v-form">
+            <md-filled-text-field id="c-amount" label="Cash Amount ($)" type="number" step="any" value="0" required></md-filled-text-field>
+            <md-filled-text-field id="c-date" label="Date" type="date" required></md-filled-text-field>
+            <md-filled-button type="submit" trailing-icon>Update Cash<md-icon slot="icon">attach_money</md-icon></md-filled-button>
+        </form>
+    </div>
+
+    <!-- Holdings -->
+    <div class="surface-card">
+        <div class="card-head-row">
+            <h2 class="card-heading">Holdings</h2>
+            <md-filled-tonal-button id="btn-add-holding" trailing-icon>Add Holding<md-icon slot="icon">add</md-icon></md-filled-tonal-button>
+        </div>
+        <div class="edit-panel hidden" id="holding-edit-panel">
+            <h3 class="edit-panel-title" id="holding-edit-title">Add Holding</h3>
+            <form id="holding-form" class="v-form">
+                <input type="hidden" id="h-id" value="">
+                <md-filled-text-field id="h-ticker" label="Ticker" placeholder="e.g. AAPL" required></md-filled-text-field>
+                <md-filled-text-field id="h-qty" label="Quantity (Shares)" type="number" step="any" value="0" required></md-filled-text-field>
+                <md-filled-text-field id="h-cost" label="Avg Cost per Share ($)" type="number" step="any" value="0"></md-filled-text-field>
+                <md-filled-text-field id="h-sector" label="Sector" placeholder="e.g. Technology"></md-filled-text-field>
+                <div class="form-actions">
+                    <md-filled-button type="submit" id="h-submit-btn" trailing-icon><span id="h-submit-label">Save Holding</span><md-icon slot="icon">save</md-icon></md-filled-button>
+                    <md-outlined-button type="button" id="h-cancel-btn">Cancel</md-outlined-button>
+                </div>
+            </form>
+        </div>
+        <div class="table-wrap" id="holdings-list-wrap">
+            <table class="md-table" id="holdings-list-table">
+                <thead><tr><th>Ticker</th><th class="num">Shares</th><th class="num">Avg Cost</th><th>Sector</th><th>Actions</th></tr></thead>
+                <tbody id="holdings-list-tbody"></tbody>
+            </table>
+        </div>
+        <div class="empty-state hidden" id="holdings-list-empty"><md-icon>inventory_2</md-icon><p>No holdings. Add your first position.</p></div>
+    </div>
+
+    <!-- Transactions -->
+    <div class="surface-card">
+        <h2 class="card-heading">Transactions</h2>
+        <form id="tx-form" class="v-form">
+            <md-filled-text-field id="tx-ticker" label="Ticker" placeholder="e.g. AAPL" required></md-filled-text-field>
+            <md-filled-select id="tx-type" label="Type">
+                <md-select-option value="buy"><div slot="headline">Buy</div></md-select-option>
+                <md-select-option value="sell"><div slot="headline">Sell</div></md-select-option>
+            </md-filled-select>
+            <md-filled-text-field id="tx-qty" label="Quantity" type="number" step="any" value="0" required></md-filled-text-field>
+            <md-filled-text-field id="tx-price" label="Price per Share ($)" type="number" step="any" value="0" required></md-filled-text-field>
+            <md-filled-text-field id="tx-fees" label="Fees ($)" type="number" step="any" value="0"></md-filled-text-field>
+            <md-filled-text-field id="tx-date" label="Trade Date" type="date" required></md-filled-text-field>
+            <md-filled-text-field id="tx-notes" label="Notes" placeholder="Optional"></md-filled-text-field>
+            <md-filled-button type="submit" trailing-icon>Record Transaction<md-icon slot="icon">receipt_long</md-icon></md-filled-button>
+        </form>
+        <md-divider></md-divider>
+        <div class="table-wrap" style="margin-top:16px">
+            <table class="md-table" id="tx-list-table">
+                <thead><tr><th>Date</th><th>Type</th><th>Ticker</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Fees</th><th class="num">Total</th><th>Notes</th><th></th></tr></thead>
+                <tbody id="tx-list-tbody"></tbody>
+            </table>
+        </div>
+        <div class="empty-state hidden" id="tx-list-empty"><md-icon>receipt_long</md-icon><p>No transactions recorded</p></div>
+    </div>
+</section>
+
+</main>
+
+<!-- Detail Dialog -->
+<md-dialog id="detail-dialog" class="fullscreen-dialog">
+    <div slot="headline" id="detail-title"></div>
+    <div slot="content" id="detail-body"></div>
+    <div slot="actions"><md-text-button id="detail-close-btn" dialog-dismiss>Close</md-text-button></div>
+</md-dialog>
+
+<!-- Toast -->
+<div class="toast hidden" id="toast"></div>
+
+<script type="module" src="/static/js/api.js"></script>
+<script type="module" src="/static/js/portfolio.js"></script>
+<script type="module" src="/static/js/analysis.js"></script>
+<script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
