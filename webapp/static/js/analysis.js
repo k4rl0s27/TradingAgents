@@ -21,6 +21,7 @@ export function initAnalysisForm() {
         e.preventDefault();
         const ticker = fv('an-ticker').trim().toUpperCase();
         const analysisType = fv('an-type');
+        const analysisDepth = fv('an-depth');
         const analysisDate = fv('an-date');
         if (!ticker || !analysisDate) { showToast('Fill in ticker and date', 'error'); return; }
 
@@ -29,73 +30,98 @@ export function initAnalysisForm() {
         const results = g('an-results');
         const progText = g('an-progress-text');
         const progStatus = g('an-progress-status');
+        const resultGrid = g('an-result-grid');
 
         submitBtn.disabled = true;
         progress.classList.remove('hidden');
         results.classList.add('hidden');
+        resultGrid.innerHTML = '';
         setStatus('running');
+        g('an-result-ticker').textContent = `${ticker}`;
+        g('an-result-rating').textContent = '';
+        g('an-result-rating').className = 'rating-pill';
+        results.classList.remove('hidden');
+
+        let agentCount = 0;
 
         try {
-            const run = await api.runAnalysis(ticker, analysisDate, analysisType);
+            // Start the analysis
+            const run = await api.runAnalysis(ticker, analysisDate, analysisType, analysisDepth);
             progText.textContent = `Analysis started for ${ticker}...`;
-            progStatus.textContent = `Run #${run.id} — waiting for completion...`;
-            await poll(run.id, progText, progStatus);
-            const detail = await api.getAnalysisDetail(run.id);
-            renderResults(detail, ticker);
-            setStatus('completed');
-            showToast(`${ticker} analysis complete — ${detail.run.rating || 'done'}`, 'success');
+            progStatus.textContent = `Run #${run.id} — streaming agent outputs`;
+
+            // Connect to SSE stream
+            const es = new EventSource(`/api/analysis/stream/${run.id}`);
+
+            es.addEventListener('agent', (evt) => {
+                const data = JSON.parse(evt.data);
+                agentCount = data.index;
+                progText.textContent = `${ticker} — ${data.agent_name} completed`;
+                progStatus.textContent = `Agent ${agentCount} done`;
+
+                // Append result card in real-time
+                const card = document.createElement('div');
+                card.className = 'result-card result-card-streaming';
+                card.innerHTML = `
+                    <div class="result-card-head">
+                        <span class="result-agent">${escHtml(data.agent_name)}</span>
+                        <span class="result-type">streaming</span>
+                    </div>
+                    <div class="result-body">${escHtml(data.content).replace(/\n/g, '<br>')}</div>`;
+                resultGrid.appendChild(card);
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            });
+
+            es.addEventListener('complete', (evt) => {
+                es.close();
+                const data = JSON.parse(evt.data);
+                const rating = data.rating || 'Unknown';
+                g('an-result-rating').textContent = rating;
+                g('an-result-rating').className = `rating-pill rating-${rating.toLowerCase()}`;
+                progText.textContent = 'Analysis complete';
+                progStatus.textContent = `${agentCount} agents finished`;
+                progress.classList.add('hidden');
+                setStatus('completed');
+                submitBtn.disabled = false;
+                showToast(`${ticker} analysis complete — ${rating}`, 'success');
+                // Refresh history
+                window.loadHistory && window.loadHistory(1);
+            });
+
+            es.addEventListener('error', (evt) => {
+                es.close();
+                let errMsg = 'Analysis failed';
+                try { const d = JSON.parse(evt.data); errMsg = d.error || errMsg; } catch (_) {}
+                progText.textContent = 'Analysis failed';
+                progStatus.textContent = errMsg;
+                setStatus('failed');
+                submitBtn.disabled = false;
+                showToast(errMsg, 'error');
+            });
+
+            // Fallback: close EventSource on generic error (connection lost, etc.)
+            es.onerror = () => {
+                es.close();
+                if (!submitBtn.disabled) return; // already handled
+                progText.textContent = 'Connection lost';
+                progStatus.textContent = 'Stream disconnected unexpectedly';
+                setStatus('failed');
+                submitBtn.disabled = false;
+                showToast('Stream disconnected', 'error');
+            };
+
         } catch (err) {
-            progText.textContent = 'Analysis failed';
+            progText.textContent = 'Analysis failed to start';
             progStatus.textContent = err.message;
             setStatus('failed');
-            showToast(err.message, 'error');
-        } finally {
             submitBtn.disabled = false;
+            showToast(err.message, 'error');
+            progress.classList.add('hidden');
         }
     });
 
     // Set default date
     fs('an-date', new Date().toISOString().split('T')[0]);
-}
-
-async function poll(runId, progText, progStatus) {
-    for (let i = 0; i < 120; i++) {
-        await new Promise(r => setTimeout(r, 5000));
-        try {
-            const s = await api.getAnalysisStatus(runId);
-            progStatus.textContent = `Run #${runId} — ${s.status} (poll ${i + 1}/120)`;
-            if (s.status === 'completed') { progText.textContent = 'Complete — loading results...'; return; }
-            if (s.status === 'failed') throw new Error(s.error_message || 'Analysis failed');
-        } catch (err) {
-            if (err.message.includes('failed') || err.message.includes('not found')) throw err;
-            progStatus.textContent = `Retrying... ${err.message}`;
-        }
-    }
-    throw new Error('Analysis timed out');
-}
-
-function renderResults(detail, ticker) {
-    g('an-result-ticker').textContent = `${ticker} — Results`;
-    const r = detail.run.rating || 'Unknown';
-    const pill = g('an-result-rating');
-    pill.textContent = r;
-    pill.className = `rating-pill rating-${r.toLowerCase()}`;
-
-    const grid = g('an-result-grid');
-    grid.innerHTML = '';
-    for (const item of detail.results) {
-        const card = document.createElement('div');
-        card.className = 'result-card';
-        card.innerHTML = `
-            <div class="result-card-head">
-                <span class="result-agent">${escHtml(item.agent_name.replace(/_/g, ' '))}</span>
-                <span class="result-type">${escHtml(item.output_type.replace(/_/g, ' '))}</span>
-            </div>
-            <div class="result-body">${item.content}</div>`;
-        grid.appendChild(card);
-    }
-    g('an-results').classList.remove('hidden');
-    g('an-results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -119,11 +145,13 @@ function renderHistoryTable(data) {
     const tbody = g('history-tbody');
     tbody.innerHTML = '';
     if (!data.items?.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No analyses found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No analyses found.</td></tr>';
         return;
     }
     for (const run of data.items) {
         const rating = run.rating || 'Unknown';
+        const depth = run.analysis_depth || 'medium';
+        const depthEmoji = { quick: '⚡', medium: '📊', deep: '🔬' }[depth] || '📊';
         const dateStr = run.analysis_date || '--';
         const createdStr = run.created_at ? new Date(run.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '--';
         const tr = document.createElement('tr');
@@ -131,6 +159,7 @@ function renderHistoryTable(data) {
         tr.innerHTML = `
             <td>#${run.id}</td>
             <td><strong>${escHtml(run.ticker)}</strong></td>
+            <td>${depthEmoji} ${escHtml(depth)}</td>
             <td>${dateStr}</td>
             <td><span class="rating-pill rating-${rating.toLowerCase()}">${escHtml(rating)}</span></td>
             <td><span class="status-chip ${run.status}">${escHtml(run.status)}</span></td>

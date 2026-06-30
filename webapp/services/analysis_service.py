@@ -27,43 +27,141 @@ except Exception:
 
 # ── Background task runner ────────────────────────────────────────────────────
 
-# In-memory registry of running tasks (for status polling).
-# In production you'd use a proper task queue; this is fine for single-user LAN use.
+# In-memory registry of running tasks and SSE event queues.
 _running_tasks: dict[int, asyncio.Task] = {}
+_event_queues: dict[int, asyncio.Queue] = {}
 
 
-async def run_analysis_background(run_id: int) -> None:
-    """Execute an analysis in the background and store results."""
+def _depth_config(depth: str) -> dict:
+    """Return graph configuration for the given analysis depth."""
+    configs = {
+        "quick": {
+            "selected_analysts": ("market", "fundamentals"),
+            "config_overrides": {
+                "max_debate_rounds": 0,
+                "max_risk_discuss_rounds": 0,
+                "news_article_limit": 5,
+                "global_news_article_limit": 3,
+            },
+        },
+        "medium": {
+            "selected_analysts": ("market", "social", "news", "fundamentals"),
+            "config_overrides": {
+                "max_debate_rounds": 1,
+                "max_risk_discuss_rounds": 1,
+                "news_article_limit": 20,
+                "global_news_article_limit": 10,
+            },
+        },
+        "deep": {
+            "selected_analysts": ("market", "social", "news", "fundamentals"),
+            "config_overrides": {
+                "max_debate_rounds": 2,
+                "max_risk_discuss_rounds": 2,
+                "news_article_limit": 30,
+                "global_news_article_limit": 15,
+            },
+        },
+    }
+    return configs.get(depth, configs["medium"])
+
+
+def _node_to_agent(node_name: str) -> str:
+    """Map a graph node name to a human-readable agent name."""
+    mapping = {
+        "market_analyst": "Market Analyst",
+        "sentiment_analyst": "Sentiment Analyst",
+        "news_analyst": "News Analyst",
+        "fundamentals_analyst": "Fundamentals Analyst",
+        "bull_researcher": "Bull Researcher",
+        "bear_researcher": "Bear Researcher",
+        "research_manager": "Research Manager",
+        "trader": "Trader",
+        "aggressive_risk": "Risk Analyst (Aggressive)",
+        "conservative_risk": "Risk Analyst (Conservative)",
+        "neutral_risk": "Risk Analyst (Neutral)",
+        "portfolio_manager": "Portfolio Manager",
+    }
+    return mapping.get(node_name, node_name.replace("_", " ").title())
+
+
+async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
+    """Execute an analysis in the background, streaming agent outputs via SSE."""
     db = await get_db()
     try:
-        # Load the run details
         cursor = await db.execute("SELECT * FROM analysis_runs WHERE id = ?", (run_id,))
         run = await cursor.fetchone()
         if not run:
+            queue.put_nowait({"type": "error", "error": "Analysis run not found"})
+            queue.put_nowait(None)
             return
         run = dict(run)
 
         if not _tradingagents_available:
             raise RuntimeError("TradingAgentsGraph is not available.")
 
-        # Build portfolio context from the database
         portfolio_context = await build_portfolio_context()
 
-        # Initialize the graph
-        ta = TradingAgentsGraph(debug=False)
-
-        # Run the analysis in a thread (propagate is synchronous)
-        loop = asyncio.get_event_loop()
-        final_state, signal = await loop.run_in_executor(
-            None,
-            lambda: ta.propagate(
-                run["ticker"],
-                run["analysis_date"],
-                portfolio_context=portfolio_context,
-            ),
+        # Configure graph based on analysis depth
+        from tradingagents.default_config import DEFAULT_CONFIG
+        depth_cfg = _depth_config(run["analysis_depth"])
+        config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
+        ta = TradingAgentsGraph(
+            debug=False,
+            selected_analysts=depth_cfg["selected_analysts"],
+            config=config,
         )
 
-        # Extract structured outputs from final_state and store them
+        # Run the graph with streaming in a thread, pushing events to the queue
+        loop = asyncio.get_event_loop()
+
+        def _stream_and_collect():
+            """Run graph.stream() and push each node output to the queue."""
+            # Recreate the graph steps inline (same as propagate without checkpoint)
+            past_context = ta.memory_log.get_past_context(run["ticker"])
+            instrument_context = ta.resolve_instrument_context(run["ticker"], "stock")
+            init_state = ta.propagator.create_initial_state(
+                run["ticker"], run["analysis_date"],
+                past_context=past_context,
+                instrument_context=instrument_context,
+                portfolio_context=portfolio_context,
+            )
+            args = ta.propagator.get_graph_args()
+
+            final_state = {}
+            for chunk in ta.graph.stream(init_state, **args):
+                final_state.update(chunk)
+                # Extract the node name and output from the chunk
+                for node_name, node_output in chunk.items():
+                    if node_name in ("__start__", "__end__", "tools"):
+                        continue
+                    agent_display = _node_to_agent(node_name)
+                    content = _extract_chunk_content(node_output, node_name)
+                    if content:
+                        loop.call_soon_threadsafe(
+                            queue.put_nowait,
+                            {"type": "agent", "agent_name": agent_display, "content": str(content)[:3000]},
+                        )
+
+            # Push completion event
+            rating = _extract_rating(final_state.get("final_trade_decision", ""))
+            entry_price = _extract_entry_price(final_state.get("trader_investment_plan", ""))
+            stop_loss = _extract_stop_loss(final_state.get("trader_investment_plan", ""))
+            position_sizing = _extract_position_sizing(final_state.get("trader_investment_plan", ""))
+
+            loop.call_soon_threadsafe(
+                queue.put_nowait,
+                {"type": "complete", "rating": rating, "entry_price": entry_price,
+                 "stop_loss": stop_loss, "position_sizing": position_sizing},
+            )
+
+            return final_state, rating, entry_price, stop_loss, position_sizing
+
+        final_state, rating, entry_price, stop_loss, position_sizing = await loop.run_in_executor(
+            None, _stream_and_collect,
+        )
+
+        # Store results in DB
         results = _extract_results(final_state)
         for r in results:
             await db.execute(
@@ -71,12 +169,6 @@ async def run_analysis_background(run_id: int) -> None:
                    VALUES (?, ?, ?, ?)""",
                 (run_id, r["agent_name"], r["output_type"], r["content"]),
             )
-
-        # Extract final decision details
-        rating = _extract_rating(final_state.get("final_trade_decision", ""))
-        entry_price = _extract_entry_price(final_state.get("trader_investment_plan", ""))
-        stop_loss = _extract_stop_loss(final_state.get("trader_investment_plan", ""))
-        position_sizing = _extract_position_sizing(final_state.get("trader_investment_plan", ""))
 
         await db.execute(
             """UPDATE analysis_runs
@@ -89,6 +181,11 @@ async def run_analysis_background(run_id: int) -> None:
 
     except Exception as e:
         logger.exception("Analysis run %d failed: %s", run_id, e)
+        if queue is not None:
+            try:
+                queue.put_nowait({"type": "error", "error": str(e)[:500]})
+            except Exception:
+                pass
         try:
             await db.execute(
                 "UPDATE analysis_runs SET status = 'failed', error_message = ?, "
@@ -101,6 +198,76 @@ async def run_analysis_background(run_id: int) -> None:
     finally:
         await db.close()
         _running_tasks.pop(run_id, None)
+        # Signal end of stream
+        if queue is not None:
+            try:
+                queue.put_nowait(None)  # Sentinel to close SSE
+            except Exception:
+                pass
+            _event_queues.pop(run_id, None)
+
+
+def _extract_chunk_content(node_output: dict, node_name: str) -> str | None:
+    """Extract meaningful content from a streaming chunk for the given node."""
+    if not isinstance(node_output, dict):
+        return None
+    # Look for messages in the node output
+    messages = node_output.get("messages", [])
+    if messages:
+        last_msg = messages[-1]
+        content = getattr(last_msg, "content", None)
+        if content:
+            return str(content)
+    # Try common state keys
+    for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report",
+                 "investment_plan", "trader_investment_plan", "final_trade_decision"):
+        val = node_output.get(key)
+        if val:
+            return str(val)[:3000]
+    return None
+
+
+async def stream_analysis_events(run_id: int):
+    """Async generator that yields SSE-formatted events for an analysis run."""
+    queue = _event_queues.get(run_id)
+    if queue is None:
+        yield f"event: error\ndata: {{\"error\": \"Run not found or already completed\"}}\n\n"
+        return
+
+    agent_count = 0
+    while True:
+        try:
+            event = await asyncio.wait_for(queue.get(), timeout=60.0)
+        except asyncio.TimeoutError:
+            yield f"event: error\ndata: {{\"error\": \"Stream timed out\"}}\n\n"
+            return
+
+        if event is None:  # Sentinel
+            return
+
+        if event["type"] == "agent":
+            agent_count += 1
+            import json
+            data = json.dumps({
+                "agent_name": event["agent_name"],
+                "content": event["content"],
+                "index": agent_count,
+            })
+            yield f"event: agent\ndata: {data}\n\n"
+        elif event["type"] == "complete":
+            import json
+            data = json.dumps({
+                "rating": event["rating"],
+                "entry_price": event["entry_price"],
+                "stop_loss": event["stop_loss"],
+                "position_sizing": event["position_sizing"],
+            })
+            yield f"event: complete\ndata: {data}\n\n"
+        elif event["type"] == "error":
+            import json
+            data = json.dumps({"error": event["error"]})
+            yield f"event: error\ndata: {data}\n\n"
+            return
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -109,6 +276,7 @@ async def start_analysis(
     ticker: str,
     analysis_date: str,
     analysis_type: str = "regular",
+    analysis_depth: str = "medium",
 ) -> int:
     """Create a new analysis run and start it in the background. Returns run_id."""
     if analysis_type == "options":
@@ -117,17 +285,21 @@ async def start_analysis(
     db = await get_db()
     try:
         cursor = await db.execute(
-            """INSERT INTO analysis_runs (ticker, analysis_type, analysis_date, status)
-               VALUES (?, ?, ?, 'running')""",
-            (ticker.upper(), analysis_type, analysis_date),
+            """INSERT INTO analysis_runs (ticker, analysis_type, analysis_depth, analysis_date, status)
+               VALUES (?, ?, ?, ?, 'running')""",
+            (ticker.upper(), analysis_type, analysis_depth, analysis_date),
         )
         run_id = cursor.lastrowid
         await db.commit()
     finally:
         await db.close()
 
+    # Create event queue before starting background task so SSE connects immediately
+    queue: asyncio.Queue = asyncio.Queue()
+    _event_queues[run_id] = queue
+
     # Start background task
-    task = asyncio.create_task(run_analysis_background(run_id))
+    task = asyncio.create_task(run_analysis_background(run_id, queue))
     _running_tasks[run_id] = task
 
     return run_id

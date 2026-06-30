@@ -1,8 +1,9 @@
 """
-Analysis API routes — run analyses, view history and results.
+Analysis API routes — run analyses, view history, stream results.
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 
 from ..models import AnalysisRunRequest, AnalysisRunResponse, StatusResponse
 from ..services import analysis_service as svc
@@ -12,18 +13,33 @@ router = APIRouter(prefix="/api/analysis", tags=["analysis"])
 
 @router.post("/run", response_model=AnalysisRunResponse)
 async def run_analysis(body: AnalysisRunRequest):
-    """Start a new analysis. Runs in the background; poll via /status/{id}."""
+    """Start a new analysis. Stream progress via /stream/{id}."""
     try:
         run_id = await svc.start_analysis(
             ticker=body.ticker,
             analysis_date=body.analysis_date,
             analysis_type=body.analysis_type,
+            analysis_depth=body.analysis_depth,
         )
     except NotImplementedError as e:
         raise HTTPException(status_code=501, detail=str(e))
 
     status = await svc.get_analysis_status(run_id)
     return status
+
+
+@router.get("/stream/{run_id}")
+async def stream_analysis(run_id: int):
+    """SSE stream of agent outputs as the analysis runs."""
+    return StreamingResponse(
+        svc.stream_analysis_events(run_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/status/{run_id}")

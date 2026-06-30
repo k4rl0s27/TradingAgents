@@ -29,6 +29,11 @@ async def init_db() -> None:
     db = await get_db()
     try:
         await db.executescript(_SCHEMA_SQL)
+        # Migrations for existing databases
+        try:
+            await db.execute("ALTER TABLE analysis_runs ADD COLUMN analysis_depth TEXT NOT NULL DEFAULT 'medium'")
+        except Exception:
+            pass  # Column already exists
         await db.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
             (SCHEMA_VERSION,),
@@ -83,6 +88,7 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ticker TEXT NOT NULL,
     analysis_type TEXT NOT NULL DEFAULT 'regular' CHECK(analysis_type IN ('regular', 'options')),
+    analysis_depth TEXT NOT NULL DEFAULT 'medium' CHECK(analysis_depth IN ('quick', 'medium', 'deep')),
     analysis_date TEXT NOT NULL,
     rating TEXT,
     entry_price REAL,
