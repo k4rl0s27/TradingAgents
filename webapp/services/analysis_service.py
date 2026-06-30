@@ -100,12 +100,42 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
         if not _tradingagents_available:
             raise RuntimeError("TradingAgentsGraph is not available.")
 
-        portfolio_context = await build_portfolio_context()
+        user_id = run["user_id"]
+        portfolio_context = await build_portfolio_context(user_id)
 
         # Configure graph based on analysis depth
         from tradingagents.default_config import DEFAULT_CONFIG
         depth_cfg = _depth_config(run["analysis_depth"])
-        config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
+
+        # Merge user's LLM settings (provider, api_key, model choices) into config
+        from ..services.user_service import get_user_llm_config
+        user_llm = await get_user_llm_config(user_id)
+        if user_llm:
+            # Only override provider/model/key from user settings;
+            # everything else stays as DEFAULT_CONFIG or depth overrides.
+            config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
+            config["llm_provider"] = user_llm.get("llm_provider", config["llm_provider"])
+            if user_llm.get("deep_think_llm"):
+                config["deep_think_llm"] = user_llm["deep_think_llm"]
+            if user_llm.get("quick_think_llm"):
+                config["quick_think_llm"] = user_llm["quick_think_llm"]
+            if user_llm.get("backend_url"):
+                config["backend_url"] = user_llm["backend_url"]
+            if user_llm.get("temperature") is not None:
+                config["temperature"] = user_llm["temperature"]
+            if user_llm.get("google_thinking_level"):
+                config["google_thinking_level"] = user_llm["google_thinking_level"]
+            if user_llm.get("openai_reasoning_effort"):
+                config["openai_reasoning_effort"] = user_llm["openai_reasoning_effort"]
+            if user_llm.get("anthropic_effort"):
+                config["anthropic_effort"] = user_llm["anthropic_effort"]
+            # The per-user API key flows through config, then into llm_kwargs
+            # via _get_provider_kwargs → the client factory's **kwargs
+            if user_llm.get("api_key"):
+                config["api_key"] = user_llm["api_key"]
+        else:
+            config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
+
         ta = TradingAgentsGraph(
             debug=False,
             selected_analysts=depth_cfg["selected_analysts"],
@@ -328,6 +358,7 @@ async def stream_analysis_events(run_id: int):
 # ── Public API ────────────────────────────────────────────────────────────────
 
 async def start_analysis(
+    user_id: int,
     ticker: str,
     analysis_date: str,
     analysis_type: str = "regular",
@@ -340,9 +371,9 @@ async def start_analysis(
     db = await get_db()
     try:
         cursor = await db.execute(
-            """INSERT INTO analysis_runs (ticker, analysis_type, analysis_depth, analysis_date, status)
-               VALUES (?, ?, ?, ?, 'running')""",
-            (ticker.upper(), analysis_type, analysis_depth, analysis_date),
+            """INSERT INTO analysis_runs (user_id, ticker, analysis_type, analysis_depth, analysis_date, status)
+               VALUES (?, ?, ?, ?, ?, 'running')""",
+            (user_id, ticker.upper(), analysis_type, analysis_depth, analysis_date),
         )
         run_id = cursor.lastrowid
         await db.commit()
@@ -373,12 +404,13 @@ async def get_analysis_status(run_id: int) -> dict:
         await db.close()
 
 
-async def get_running_analyses() -> dict:
+async def get_running_analyses(user_id: int) -> dict:
     """Get analyses that are currently running, newest first."""
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT * FROM analysis_runs WHERE status = 'running' ORDER BY created_at DESC LIMIT 5"
+            "SELECT * FROM analysis_runs WHERE user_id = ? AND status = 'running' ORDER BY created_at DESC LIMIT 5",
+            (user_id,),
         )
         rows = await cursor.fetchall()
         return {"running": [dict(r) for r in rows]}
@@ -387,6 +419,7 @@ async def get_running_analyses() -> dict:
 
 
 async def get_analysis_history(
+    user_id: int,
     page: int = 1,
     per_page: int = 20,
     ticker_filter: str = "",
@@ -395,8 +428,8 @@ async def get_analysis_history(
     """Get paginated analysis history."""
     db = await get_db()
     try:
-        where_clauses = []
-        params = []
+        where_clauses = ["user_id = ?"]
+        params = [user_id]
 
         if ticker_filter:
             where_clauses.append("ticker = ?")

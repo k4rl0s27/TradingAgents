@@ -11,11 +11,33 @@ async function request(path, options = {}) {
         ...options,
     });
     if (!res.ok) {
+        // Handle 401 by redirecting to login
+        if (res.status === 401) {
+            window.location.href = '/auth/login';
+            throw new Error('Not authenticated');
+        }
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || `HTTP ${res.status}`);
     }
-    return res.json();
+    // For 204 No Content or empty responses
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
 }
+
+// ── Auth ─────────────────────────────────────────────────────────────────
+
+export const getMe = () => request('/auth/me');
+export const logout = () => request('/auth/logout', { method: 'POST' });
+
+// ── Settings ─────────────────────────────────────────────────────────────
+
+export const getProviders = () => request('/api/settings/providers');
+export const getProviderModels = (provider) => request(`/api/settings/providers/${provider}/models`);
+export const getSettings = () => request('/api/settings');
+export const initializeSettings = (body) => request('/api/settings/initialize', {
+    method: 'POST',
+    body: JSON.stringify(body),
+});
 
 // ── Portfolio ────────────────────────────────────────────────────────────
 

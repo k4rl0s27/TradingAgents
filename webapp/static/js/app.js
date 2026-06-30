@@ -6,6 +6,7 @@
 
 import { loadDashboard, initCashForm, initHoldingForm, initTxForm, loadPortfolioManager } from './portfolio.js';
 import { initAnalysisForm, loadHistory, initHistoryTab, reconnectRunningAnalysis } from './analysis.js';
+import { initAuth, logout, isAuthenticated, isInitialized } from './auth.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Toast
@@ -143,20 +144,26 @@ document.addEventListener('keydown', (e) => {
 // Init
 // ═══════════════════════════════════════════════════════════════════════════
 
-function init() {
+async function init() {
     initDarkMode();
 
-    // Initialize all forms
+    // Initialize all forms (they work even if auth isn't configured)
     initAnalysisForm();
     initHistoryTab();
     initCashForm();
     initHoldingForm();
     initTxForm();
 
+    // Check auth — if OIDC is configured, this will redirect to login.
+    // If OIDC is not configured, the app runs without auth.
+    const authenticated = await initAuth();
+
     // Restore view from hash or default to dashboard
-    const hash = window.location.hash.replace('#', '');
-    const target = VIEWS.includes(hash) ? hash : 'dashboard';
-    switchView(target);
+    if (authenticated && isInitialized()) {
+        const hash = window.location.hash.replace('#', '');
+        const target = VIEWS.includes(hash) ? hash : 'dashboard';
+        switchView(target);
+    }
 
     // Listen for hash changes
     window.addEventListener('hashchange', () => {
@@ -168,6 +175,7 @@ function init() {
     window.switchView = switchView;
     window.toggleDarkMode = toggleDarkMode;
     window.loadHistory = loadHistory;
+    window.logout = logout;
 
     setStatus('idle');
 }
