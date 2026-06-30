@@ -18,8 +18,15 @@ def create_neutral_debator(llm):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
+        portfolio_context = state.get("portfolio_context", "")
 
         trader_decision = state["trader_investment_plan"]
+
+        portfolio_section = (
+            f"\n\n**Current Portfolio State:**\n{portfolio_context}\n"
+            if portfolio_context
+            else ""
+        )
 
         prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
 
@@ -27,7 +34,7 @@ def create_neutral_debator(llm):
 
 Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
 
-{instrument_context}
+{instrument_context}{portfolio_section}
 Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
