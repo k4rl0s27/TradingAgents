@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipts Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Symbols+Outlined" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- ── Top Bar ── -->
+    <header class="top-bar">
+        <div class="top-bar-left">
+            <span class="logo-icon material-symbols-outlined">receipt_long</span>
+            <h1 class="app-title">Receipts</h1>
+        </div>
+        <div class="top-bar-right">
+            <span class="sync-indicator" id="syncIndicator" title="Last synced">
+                <span class="sync-text" id="syncText">Ready</span>
+            </span>
+            <span class="user-chip" id="userChip" title="Current user">
+                <span class="material-symbols-outlined">account_circle</span>
+                <span id="userName">—</span>
+            </span>
+            <button class="btn-refresh" id="btnRefresh" onclick="doRefresh()">
+                <span class="material-symbols-outlined">refresh</span>
+                <span>Refresh</span>
+            </button>
+            <button class="btn-icon-only" id="btnDarkMode" onclick="toggleDarkMode()" title="Toggle dark mode">
+                <span class="material-symbols-outlined">dark_mode</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- ── Navigation ── -->
+    <nav class="nav-sidebar" id="navSidebar">
+        <div class="nav-inner">
+            <button class="nav-item active" data-view="dashboard" onclick="switchView('dashboard')">
+                <span class="material-symbols-outlined">dashboard</span>
+                <span>Dashboard</span>
+            </button>
+            <button class="nav-item" data-view="analytics" onclick="switchView('analytics')">
+                <span class="material-symbols-outlined">bar_chart</span>
+                <span>Analytics</span>
+            </button>
+            <button class="nav-item" data-view="reports" onclick="switchView('reports')">
+                <span class="material-symbols-outlined">description</span>
+                <span>Reports</span>
+            </button>
+        </div>
+    </nav>
+
+    <!-- ── Scrollable view area ── -->
+    <div class="view-scroll">
+
+    <!-- ── Init Overlay (shown on first run) ── -->
+    <div class="init-overlay" id="initOverlay">
+        <div class="init-card">
+            <span class="material-symbols-outlined init-icon">database</span>
+            <h2>Set Up Your Dashboard</h2>
+            <p>Choose a start date to pull in your transaction history from Walmart and Sam's Club.</p>
+            <div class="init-form">
+                <label for="initStartDate">Start Date</label>
+                <input type="date" id="initStartDate" value="2025-01-01">
+                <button class="btn-primary" id="btnInit" onclick="doInitialize()">
+                    <span class="material-symbols-outlined">download</span>
+                    <span>Pull Data</span>
+                </button>
+            </div>
+            <div class="init-progress" id="initProgress" hidden>
+                <div class="spinner"></div>
+                <p>Fetching your transaction history… this may take a minute.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Main Content ── -->
+    <main class="main-content" id="mainContent">
+        <!-- Summary Cards -->
+        <section class="summary-row" id="summaryRow">
+            <div class="card summary-card">
+                <div class="card-label">Total Spent</div>
+                <div class="card-value" id="statTotal">—</div>
+                <div class="card-sub" id="statOrders">—</div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-label">Sam's Club</div>
+                <div class="card-value sams-color" id="statSams">—</div>
+                <div class="card-sub" id="statSamsOrders">—</div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-label">Walmart</div>
+                <div class="card-value walmart-color" id="statWalmart">—</div>
+                <div class="card-sub" id="statWalmartOrders">—</div>
+            </div>
+            <div class="card summary-card">
+                <div class="card-label">Store Credit</div>
+                <div class="card-value savings-color" id="statSavings">—</div>
+                <div class="card-sub" id="statSavingsSub">—</div>
+            </div>
+        </section>
+
+        <!-- Category Breakdown -->
+        <section class="breakdown-row" id="breakdownRow">
+            <div class="card breakdown-card">
+                <div class="card-label">🍎 Food & Groceries</div>
+                <div class="card-value" id="statFood">—</div>
+                <div class="card-sub">prices only, tax excluded</div>
+            </div>
+            <div class="card breakdown-card">
+                <div class="card-label">🏠 Household</div>
+                <div class="card-value" id="statHousehold">—</div>
+                <div class="card-sub">prices only, tax excluded</div>
+            </div>
+            <div class="card breakdown-card">
+                <div class="card-label">📦 Other</div>
+                <div class="card-value" id="statOther">—</div>
+            </div>
+        </section>
+
+        <!-- Filters -->
+        <section class="filters-bar">
+            <div class="filter-chips">
+                <button class="chip active" data-store="all" onclick="setStoreFilter('all', this)">All</button>
+                <button class="chip" data-store="sams" onclick="setStoreFilter('sams', this)">Sam's Club</button>
+                <button class="chip" data-store="walmart" onclick="setStoreFilter('walmart', this)">Walmart</button>
+            </div>
+            <div class="filter-search">
+                <span class="material-symbols-outlined search-icon">search</span>
+                <input type="text" id="searchInput" placeholder="Search items or stores…" oninput="debounceSearch()">
+            </div>
+            <div class="filter-dates">
+                <input type="date" id="filterDateFrom" title="From date">
+                <span class="date-sep">–</span>
+                <input type="date" id="filterDateTo" title="To date">
+            </div>
+            <button class="btn-create-report" id="btnCreateReport" onclick="createReport()" title="Create a report from current filters">
+                <span class="material-symbols-outlined">note_add</span>
+                <span>Create Report</span>
+            </button>
+        </section>
+
+        <!-- Orders Table -->
+        <section class="orders-section">
+            <div class="orders-header">
+                <h2>Transactions</h2>
+                <span class="order-count" id="orderCount">0 orders</span>
+            </div>
+            <div class="table-container">
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable" onclick="setSort('order_date')">Date <span class="sort-arrow" id="sort-order_date"></span></th>
+                            <th>Store</th>
+                            <th class="sortable" onclick="setSort('actual_card_amount')">Card Amt <span class="sort-arrow" id="sort-actual_card_amount"></span></th>
+                            <th>Items</th>
+                            <th>Payment</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="ordersBody">
+                        <tr><td colspan="6" class="empty-state">No transactions yet. Pull your data to get started.</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <!-- Pagination -->
+            <div class="pagination" id="pagination"></div>
+        </section>
+    </main>
+
+    <!-- ── Analytics View ── -->
+    <section class="analytics-view" id="analyticsView" hidden>
+        <div class="analytics-header">
+            <h2>Analytics</h2>
+        </div>
+        <div class="filters-bar" id="analyticsFilters">
+            <div class="filter-chips">
+                <button class="chip active" data-store="all" onclick="setAnalyticsStore('all', this)">All</button>
+                <button class="chip" data-store="sams" onclick="setAnalyticsStore('sams', this)">Sam's Club</button>
+                <button class="chip" data-store="walmart" onclick="setAnalyticsStore('walmart', this)">Walmart</button>
+            </div>
+            <div class="filter-dates">
+                <input type="date" id="analyticsDateFrom" title="From date">
+                <span class="date-sep">–</span>
+                <input type="date" id="analyticsDateTo" title="To date">
+            </div>
+        </div>
+        <div class="charts-grid">
+            <div class="card chart-card">
+                <div class="chart-card-header">
+                    <span class="card-label">Spending Trend</span>
+                    <select id="analyticsGrouping" onchange="loadTrendOnly()" class="grouping-select">
+                        <option value="daily">Daily</option>
+                        <option value="weekly" selected>Weekly</option>
+                        <option value="monthly">Monthly</option>
+                    </select>
+                </div>
+                <canvas id="chartTrend"></canvas>
+            </div>
+            <div class="card chart-card">
+                <div class="card-label">Category Split</div>
+                <canvas id="chartDoughnut"></canvas>
+            </div>
+            <div class="card chart-card">
+                <div class="card-label">Top Items by Spend</div>
+                <canvas id="chartTopSpend"></canvas>
+            </div>
+            <div class="card chart-card">
+                <div class="card-label">Top Items by Count</div>
+                <canvas id="chartTopCount"></canvas>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── Reports List View ── -->
+    <section class="reports-view" id="reportsView" hidden>
+        <div class="reports-header">
+            <h2>Reports</h2>
+            <span class="reports-count" id="reportsCount"></span>
+        </div>
+        <div class="reports-grid" id="reportsGrid"></div>
+    </section>
+
+    <!-- ── Report Detail View ── -->
+    <section class="report-detail-view" id="reportDetailView" hidden>
+        <div class="report-detail-header">
+            <button class="btn-text" onclick="switchView('reports')">
+                <span class="material-symbols-outlined">arrow_back</span> Back to Reports
+            </button>
+            <div class="report-detail-title">
+                <h2 id="reportDetailName"></h2>
+                <button class="btn-icon-sm" onclick="deleteReport(currentReportId)" title="Delete report">
+                    <span class="material-symbols-outlined">delete</span>
+                </button>
+            </div>
+            <button class="btn-primary" onclick="showAddOrderModal()">
+                <span class="material-symbols-outlined">add</span>
+                <span>Add Order</span>
+            </button>
+        </div>
+        <!-- Report stats -->
+        <div class="report-stats" id="reportStats"></div>
+        <!-- Report orders table -->
+        <section class="orders-section">
+            <div class="orders-header">
+                <span class="order-count" id="reportOrderCount">0 orders</span>
+            </div>
+            <div class="table-container">
+                <table class="orders-table">
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Store</th>
+                            <th>Card Amt</th>
+                            <th>Items</th>
+                            <th>Payment</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="reportOrdersBody"></tbody>
+                </table>
+            </div>
+            <div class="pagination" id="reportPagination"></div>
+        </section>
+    </section>
+
+    </div>
+    <!-- end view-scroll -->
+
+    <!-- ── Add/Edit Order Modal ── -->
+    <div class="modal-overlay" id="orderModal" hidden>
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3 id="modalTitle">Add Order</h3>
+                <button class="btn-icon" onclick="closeOrderModal()">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- Dynamically filled -->
+            </div>
+        </div>
+    </div>
+
+    <!-- ── Order Detail Drawer ── -->
+    <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+    <aside class="drawer" id="drawer">
+        <div class="drawer-header">
+            <h2 id="drawerTitle">Order Details</h2>
+            <button class="btn-icon" onclick="closeDrawer()">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+        <div class="drawer-body" id="drawerBody"></div>
+    </aside>
+
+    <!-- ── Toast ── -->
+    <div class="toast" id="toast" hidden></div>
+
+    <!-- ── Dev Role Switcher ── -->
+    <div class="dev-switcher" id="devSwitcher" hidden>
+        <button onclick="switchDevRole('admin')">Admin</button>
+        <button onclick="switchDevRole('user')">User</button>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

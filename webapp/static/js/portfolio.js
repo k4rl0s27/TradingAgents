@@ -1,11 +1,10 @@
 /**
  * Portfolio tab logic — Dashboard + Portfolio Manager (full CRUD).
- * Uses @material/web components: access values via .value property.
+ * No framework dependencies. Uses Chart.js for allocation donut.
  */
 
 import * as api from './api.js';
-
-let allocationChart = null;
+import { showToast, setStatus } from './app.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Helpers
@@ -13,27 +12,13 @@ let allocationChart = null;
 
 export const fmtCurrency = (v) => (v == null || isNaN(v)) ? '--' : '$' + Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 export const fmtNum = (v) => (v == null || isNaN(v)) ? '--' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
-export const esc = (s) => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
+export const escHtml = (s) => { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; };
 
-export function showToast(message, type = '') {
-    const toast = document.getElementById('toast');
-    toast.textContent = message;
-    toast.className = `toast ${type}`;
-    void toast.offsetHeight;
-    toast.classList.remove('hidden');
-    toast.classList.add('show');
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => { toast.classList.add('hidden'); toast.classList.remove('show'); }, 3000);
-}
+function g(id) { return document.getElementById(id); }
+function fv(id) { const el = g(id); return el ? el.value : ''; }
+function fs(id, v) { const el = g(id); if (el) el.value = v; }
 
-export function setStatus(status) {
-    const el = document.getElementById('app-status');
-    el.className = `status-chip ${status}`;
-    const labels = { idle: 'Ready', running: 'Analyzing...', completed: 'Complete', failed: 'Error' };
-    el.textContent = labels[status] || status;
-}
-
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+let allocationChart = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Dashboard
@@ -54,104 +39,155 @@ export async function loadDashboard() {
 }
 
 function renderSummaryCards(s) {
-    document.getElementById('sum-total').textContent = fmtCurrency(s.total_value);
-    document.getElementById('sum-cash').textContent = fmtCurrency(s.cash);
-    document.getElementById('sum-holdings').textContent = fmtCurrency(s.holdings_value);
-    document.getElementById('sum-positions').textContent = s.holdings.length;
+    g('sum-total').textContent = fmtCurrency(s.total_value);
+    g('sum-cash').textContent = fmtCurrency(s.cash);
+    g('sum-holdings').textContent = fmtCurrency(s.holdings_value);
+    g('sum-positions').textContent = s.holdings.length;
+    g('sum-positions-sub').textContent = s.holdings.length + ' active holding' + (s.holdings.length !== 1 ? 's' : '');
 }
 
 function renderHoldingsTable(holdings, totalValue) {
-    const tbody = document.getElementById('holdings-tbody');
-    const empty = document.getElementById('holdings-empty');
-    tbody.innerHTML = '';
-    if (!holdings.length) { empty.classList.remove('hidden'); return; }
-    empty.classList.add('hidden');
+    const tbody = g('holdings-tbody');
+    if (!holdings.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No holdings yet. Add positions in Portfolio Manager.</td></tr>';
+        g('holdings-count').textContent = '0 positions';
+        return;
+    }
+    g('holdings-count').textContent = holdings.length + ' position' + (holdings.length !== 1 ? 's' : '');
 
-    for (const h of holdings) {
+    tbody.innerHTML = holdings.map(h => {
         const val = h.quantity * (h.avg_cost || 0);
         const w = totalValue > 0 ? (val / totalValue * 100).toFixed(1) : '0.0';
-        tbody.innerHTML += `<tr>
-            <td><strong>${esc(h.ticker)}</strong></td>
+        return `<tr>
+            <td><strong>${escHtml(h.ticker)}</strong></td>
             <td class="num">${fmtNum(h.quantity)}</td>
             <td class="num">${h.avg_cost ? fmtCurrency(h.avg_cost) : '--'}</td>
             <td class="num">${fmtCurrency(val)}</td>
             <td class="num">${w}%</td></tr>`;
-    }
+    }).join('');
 }
 
 function renderAllocationChart(holdings, totalValue, cash) {
-    const canvas = document.getElementById('allocation-chart');
-    const empty = document.getElementById('chart-empty');
+    const canvas = g('allocation-chart');
+    const empty = g('chart-empty');
     if (allocationChart) { allocationChart.destroy(); allocationChart = null; }
 
     const segs = [], labels = [];
-    const colors = ['#D0BCFF','#7ADDA0','#FFB4AB','#A8C7FA','#FFD699','#CCC2DC','#B4E5F9','#F2B8B5','#C5E1A5','#FFE082'];
+    const colors = ['#D0BCFF','#7ADDA0','#FFB4AB','#A8C7FA','#FFD699','#CCC2DC','#B4E5F9','#F2B8B5','#C5E1A5','#FFE082','#FFAB91','#80CBC4'];
     if (cash > 0) { segs.push(cash); labels.push('Cash'); }
     for (const h of holdings) {
         const v = h.quantity * (h.avg_cost || 0);
         if (v > 0) { segs.push(v); labels.push(h.ticker); }
     }
-    if (!segs.length) { canvas.style.display = 'none'; empty.classList.remove('hidden'); return; }
+    if (!segs.length) { canvas.style.display = 'none'; g('chart-legend').classList.add('hidden'); empty.classList.remove('hidden'); return; }
     canvas.style.display = 'block'; empty.classList.add('hidden');
 
+    const isDark = document.documentElement.classList.contains('dark');
     allocationChart = new Chart(canvas, {
         type: 'doughnut',
-        data: { labels, datasets: [{ data: segs, backgroundColor: colors.slice(0, segs.length), borderColor: '#211F26', borderWidth: 2 }] },
+        data: { labels, datasets: [{ data: segs, backgroundColor: colors.slice(0, segs.length), borderColor: isDark ? '#2d2d2d' : '#ffffff', borderWidth: 2 }] },
         options: {
             responsive: true, maintainAspectRatio: true,
-            plugins: { legend: { position: 'right', labels: { color: '#CAC4D0', padding: 16, font: { size: 12 }, usePointStyle: true, pointStyleWidth: 8 } } },
+            plugins: { legend: { display: false } },
         },
     });
+
+    // Render custom HTML legend with proper circles
+    const legendEl = g('chart-legend');
+    legendEl.innerHTML = labels.map((label, i) => `
+        <div class="chart-legend-item">
+            <span class="chart-legend-swatch" style="background:${colors[i]}"></span>
+            <span class="chart-legend-label">${escHtml(label)}</span>
+        </div>`).join('');
+    legendEl.classList.remove('hidden');
 }
 
 function renderDashboardTransactions(txs) {
-    const tbody = document.getElementById('tx-tbody');
-    const empty = document.getElementById('tx-empty');
-    tbody.innerHTML = '';
-    if (!txs || !txs.length) { empty.classList.remove('hidden'); return; }
-    empty.classList.add('hidden');
-    for (const tx of txs) {
+    const container = g('tx-mini-list');
+    container.innerHTML = '';
+    if (!txs || !txs.length) {
+        container.innerHTML = '<p class="empty-state">No transactions yet.</p>';
+        return;
+    }
+    for (const tx of txsslice(0, 10)) {
         const isBuy = tx.transaction_type === 'buy';
-        tbody.innerHTML += `<tr>
-            <td>${esc(tx.date)}</td>
-            <td class="num ${isBuy ? 'pos' : 'neg'}">${isBuy ? 'Buy' : 'Sell'}</td>
-            <td><strong>${esc(tx.ticker)}</strong></td>
-            <td class="num">${fmtNum(tx.quantity)}</td>
-            <td class="num">${fmtCurrency(tx.price)}</td>
-            <td class="num ${isBuy ? 'neg' : 'pos'}">${isBuy ? '-' : '+'}${fmtCurrency(tx.total_amount)}</td></tr>`;
+        const dateStr = tx.date ? new Date(tx.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '--';
+        container.innerHTML += `<div class="tx-mini-item">
+            <span class="tx-mini-ticker">${escHtml(tx.ticker)}</span>
+            <span class="tx-mini-type ${tx.transaction_type}">${isBuy ? 'Buy' : 'Sell'}</span>
+            <span class="tx-mini-details">${fmtNum(tx.quantity)} @ ${fmtCurrency(tx.price)}</span>
+            <span class="tx-mini-date">${dateStr}</span>
+        </div>`;
     }
 }
+
+function txsslice(arr, n) { return arr ? arr.slice(0, n) : []; }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Portfolio Manager
 // ═══════════════════════════════════════════════════════════════════════════
 
-function getField(id) { return document.getElementById(id); }
-function fieldVal(id) { const el = getField(id); return el ? el.value : ''; }
-function setField(id, v) { const el = getField(id); if (el) el.value = v; }
-
 export async function loadPortfolioManager() {
-    await Promise.all([loadHoldingsList(), loadTransactionsList(), loadCashDisplay()]);
+    await Promise.all([loadCashTable(), loadPMHoldings(), loadPMTransactions()]);
+    setStatus('idle');
 }
 
 // ── Cash ──────────────────────────────────────────────────────────────────
 
-async function loadCashDisplay() {
+async function loadCashTable() {
     try {
         const history = await api.getCashHistory();
-        const latest = history[0];
-        getField('cash-display').textContent = latest ? fmtCurrency(latest.amount) : '$0.00';
-        getField('c-date').value = new Date().toISOString().split('T')[0];
+        const tbody = g('pm-cash-tbody');
+        const count = g('pm-cash-count');
+        tbody.innerHTML = '';
+        if (!history || !history.length) {
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No cash records.</td></tr>';
+            count.textContent = '0 entries';
+            return;
+        }
+        count.textContent = history.length + ' entr' + (history.length !== 1 ? 'ies' : 'y');
+
+        for (const h of history) {
+            const createdStr = h.created_at ? new Date(h.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }) : '--';
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escHtml(h.date)}</td>
+                <td class="num">${fmtCurrency(h.amount)}</td>
+                <td>${escHtml(h.notes || '--')}</td>
+                <td>${createdStr}</td>
+                <td>
+                    <button class="btn-delete-row" title="Delete entry" data-delete-cash="${h.id}">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
+                </td>`;
+            tbody.appendChild(tr);
+        }
+
+        tbody.querySelectorAll('[data-delete-cash]').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                if (!confirm('Delete this cash entry?')) return;
+                try {
+                    await api.deleteCash(Number(btn.dataset.deleteCash));
+                    showToast('Cash entry deleted', 'success');
+                    await loadCashTable();
+                    await loadDashboard();
+                } catch (err) { showToast(err.message, 'error'); }
+            });
+        });
     } catch (e) { /* ignore */ }
 }
 
 export function initCashForm() {
-    getField('cash-form').addEventListener('submit', async (e) => {
+    const form = g('cash-form');
+    if (!form) return;
+    fs('cash-date', new Date().toISOString().split('T')[0]);
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
         try {
-            await api.setCashBalance(fieldVal('c-amount'), fieldVal('c-date'));
+            await api.setCashBalance(fv('cash-amount'), fv('cash-date'));
             showToast('Cash balance updated', 'success');
-            await loadCashDisplay();
+            fs('cash-amount', '');
+            await loadCashTable();
             await loadDashboard();
         } catch (err) { showToast(err.message, 'error'); }
     });
@@ -159,178 +195,139 @@ export function initCashForm() {
 
 // ── Holdings CRUD ─────────────────────────────────────────────────────────
 
-let editingHoldingId = null;
-
-export async function loadHoldingsList() {
+async function loadPMHoldings() {
     try {
         const holdings = await api.getHoldings();
-        const tbody = getField('holdings-list-tbody');
-        const empty = getField('holdings-list-empty');
+        const tbody = g('pm-holdings-tbody');
+        const count = g('pm-holdings-count');
         tbody.innerHTML = '';
-        if (!holdings.length) { empty.classList.remove('hidden'); return; }
-        empty.classList.add('hidden');
+        if (!holdings.length) {
+            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No holdings.</td></tr>';
+            count.textContent = '0 positions';
+            return;
+        }
+        count.textContent = holdings.length + ' position' + (holdings.length !== 1 ? 's' : '');
 
         for (const h of holdings) {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td><strong>${esc(h.ticker)}</strong></td>
+            const val = h.quantity * (h.avg_cost || 0);
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td><strong>${escHtml(h.ticker)}</strong></td>
                 <td class="num">${fmtNum(h.quantity)}</td>
                 <td class="num">${h.avg_cost ? fmtCurrency(h.avg_cost) : '--'}</td>
-                <td>${esc(h.sector || '--')}</td>
+                <td class="num">${fmtCurrency(val)}</td>
+                <td>${escHtml(h.sector || '--')}</td>
                 <td>
-                    <md-text-button class="edit-holding-btn" data-id="${h.id}" data-ticker="${esc(h.ticker)}" data-qty="${h.quantity}" data-cost="${h.avg_cost || ''}" data-sector="${esc(h.sector || '')}">
-                        <md-icon slot="icon">edit</md-icon>Edit
-                    </md-text-button>
-                    <md-text-button class="del-holding-btn" data-id="${h.id}" data-ticker="${esc(h.ticker)}" style="--md-text-button-label-text-color:var(--color-bearish)">
-                        <md-icon slot="icon">delete</md-icon>Delete
-                    </md-text-button>
+                    <button class="btn-delete-row" title="Delete ${escHtml(h.ticker)}" data-delete-holding="${h.id}" data-ticker="${escHtml(h.ticker)}">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
                 </td>`;
-            tbody.appendChild(row);
+            tbody.appendChild(tr);
         }
 
-        // Attach handlers (MWC button clicks bubble normally)
-        tbody.querySelectorAll('.edit-holding-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                editingHoldingId = btn.dataset.id;
-                setField('h-id', btn.dataset.id);
-                setField('h-ticker', btn.dataset.ticker);
-                setField('h-qty', btn.dataset.qty);
-                setField('h-cost', btn.dataset.cost);
-                setField('h-sector', btn.dataset.sector);
-                getField('holding-edit-title').textContent = `Edit ${btn.dataset.ticker}`;
-                getField('h-submit-label').textContent = 'Update Holding';
-                getField('holding-edit-panel').classList.remove('hidden');
-            });
-        });
-
-        tbody.querySelectorAll('.del-holding-btn').forEach(btn => {
+        // Attach delete handlers
+        tbody.querySelectorAll('[data-delete-holding]').forEach(btn => {
             btn.addEventListener('click', async () => {
                 if (!confirm(`Delete holding ${btn.dataset.ticker}? This cannot be undone.`)) return;
                 try {
-                    await api.deleteHolding(Number(btn.dataset.id));
+                    await api.deleteHolding(Number(btn.dataset.deleteHolding));
                     showToast(`Deleted ${btn.dataset.ticker}`, 'success');
-                    await loadHoldingsList();
+                    await loadPMHoldings();
                     await loadDashboard();
                 } catch (err) { showToast(err.message, 'error'); }
             });
         });
-
     } catch (err) { showToast('Failed to load holdings: ' + err.message, 'error'); }
 }
 
 export function initHoldingForm() {
-    // Show add panel
-    getField('btn-add-holding').addEventListener('click', () => {
-        editingHoldingId = null;
-        setField('h-id', '');
-        setField('h-ticker', '');
-        setField('h-qty', '');
-        setField('h-cost', '');
-        setField('h-sector', '');
-        getField('holding-edit-title').textContent = 'Add Holding';
-        getField('h-submit-label').textContent = 'Save Holding';
-        getField('holding-edit-panel').classList.remove('hidden');
-    });
-
-    // Cancel button
-    getField('h-cancel-btn').addEventListener('click', () => {
-        getField('holding-edit-panel').classList.add('hidden');
-        editingHoldingId = null;
-    });
-
-    // Submit form
-    getField('holding-form').addEventListener('submit', async (e) => {
+    const form = g('holding-form');
+    if (!form) return;
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const ticker = fieldVal('h-ticker').trim();
-        const qty = fieldVal('h-qty');
-        const cost = fieldVal('h-cost');
-        const sector = fieldVal('h-sector').trim();
-
+        const ticker = fv('hold-ticker').trim().toUpperCase();
+        const qty = fv('hold-qty');
+        const cost = fv('hold-cost');
+        const sector = fv('hold-sector').trim();
+        if (!ticker || !qty) { showToast('Ticker and quantity are required', 'error'); return; }
         try {
-            if (editingHoldingId) {
-                await api.updateHolding(Number(editingHoldingId), ticker, qty, cost, sector);
-                showToast(`Updated ${ticker.toUpperCase()}`, 'success');
-            } else {
-                await api.addHolding(ticker, qty, cost, sector);
-                showToast(`Added ${ticker.toUpperCase()}`, 'success');
-            }
-            getField('holding-edit-panel').classList.add('hidden');
-            editingHoldingId = null;
-            await loadHoldingsList();
+            await api.addHolding(ticker, qty, cost || null, sector || null);
+            showToast(`Holding ${ticker} saved`, 'success');
+            fs('hold-ticker', ''); fs('hold-qty', ''); fs('hold-cost', ''); fs('hold-sector', '');
+            await loadPMHoldings();
             await loadDashboard();
         } catch (err) { showToast(err.message, 'error'); }
     });
 }
 
-// ── Transactions ──────────────────────────────────────────────────────────
+// ── Transactions CRUD ─────────────────────────────────────────────────────
 
-async function loadTransactionsList() {
+async function loadPMTransactions() {
     try {
         const txs = await api.getTransactions();
-        const tbody = getField('tx-list-tbody');
-        const empty = getField('tx-list-empty');
+        const tbody = g('pm-tx-tbody');
+        const count = g('pm-tx-count');
         tbody.innerHTML = '';
-        if (!txs || !txs.length) { empty.classList.remove('hidden'); return; }
-        empty.classList.add('hidden');
+        if (!txs || !txs.length) {
+            tbody.innerHTML = '<tr><td colspan="8" class="empty-state">No transactions.</td></tr>';
+            count.textContent = '0 transactions';
+            return;
+        }
+        count.textContent = txs.length + ' transaction' + (txs.length !== 1 ? 's' : '');
 
         for (const tx of txs) {
-            const isBuy = tx.transaction_type === 'buy';
-            tbody.innerHTML += `<tr>
-                <td>${esc(tx.date)}</td>
-                <td class="${isBuy ? 'pos' : 'neg'}">${isBuy ? 'Buy' : 'Sell'}</td>
-                <td><strong>${esc(tx.ticker)}</strong></td>
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${escHtml(tx.date)}</td>
+                <td><strong>${escHtml(tx.ticker)}</strong></td>
+                <td><span class="tx-mini-type ${tx.transaction_type}">${tx.transaction_type === 'buy' ? 'Buy' : 'Sell'}</span></td>
                 <td class="num">${fmtNum(tx.quantity)}</td>
                 <td class="num">${fmtCurrency(tx.price)}</td>
+                <td class="num">${fmtCurrency(tx.total_amount)}</td>
                 <td class="num">${fmtCurrency(tx.fees)}</td>
-                <td class="num ${isBuy ? 'neg' : 'pos'}">${isBuy ? '-' : '+'}${fmtCurrency(tx.total_amount)}</td>
-                <td>${esc(tx.notes || '')}</td>
-                <td><md-text-button class="del-tx-btn" data-id="${tx.id}" data-ticker="${esc(tx.ticker)}" style="--md-text-button-label-text-color:var(--color-bearish)"><md-icon slot="icon">delete</md-icon></md-text-button></td></tr>`;
+                <td>
+                    <button class="btn-delete-row" title="Delete transaction" data-delete-tx="${tx.id}" data-ticker="${escHtml(tx.ticker)}">
+                        <span class="material-symbols-outlined">delete</span>
+                    </button>
+                </td>`;
+            tbody.appendChild(tr);
         }
 
-        // Attach delete handlers
-        tbody.querySelectorAll('.del-tx-btn').forEach(btn => {
+        tbody.querySelectorAll('[data-delete-tx]').forEach(btn => {
             btn.addEventListener('click', async () => {
-                if (!confirm(`Delete ${btn.dataset.ticker} transaction? Holding will be recalculated.`)) return;
+                if (!confirm(`Delete ${btn.dataset.ticker} transaction? This will recalculate the holding.`)) return;
                 try {
-                    await api.deleteTransaction(Number(btn.dataset.id));
-                    showToast('Transaction deleted', 'success');
-                    await loadTransactionsList();
-                    await loadHoldingsList();
+                    await api.deleteTransaction(Number(btn.dataset.deleteTx));
+                    showToast('Transaction deleted — holding recalculated', 'success');
+                    await loadPMTransactions();
+                    await loadPMHoldings();
                     await loadDashboard();
                 } catch (err) { showToast(err.message, 'error'); }
             });
         });
-    } catch (err) { /* ignore */ }
+    } catch (err) { showToast('Failed to load transactions: ' + err.message, 'error'); }
 }
 
 export function initTxForm() {
-    getField('tx-form').addEventListener('submit', async (e) => {
+    const form = g('tx-form');
+    if (!form) return;
+    fs('tx-date', new Date().toISOString().split('T')[0]);
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const ticker = fv('tx-ticker').trim().toUpperCase();
+        const type = fv('tx-type');
+        const qty = fv('tx-qty');
+        const price = fv('tx-price');
+        const fees = fv('tx-fees');
+        const date = fv('tx-date');
+        if (!ticker || !qty || !price || !date) { showToast('Fill in all required fields', 'error'); return; }
         try {
-            await api.recordTransaction(
-                fieldVal('tx-ticker').trim(),
-                fieldVal('tx-type'),
-                fieldVal('tx-qty'),
-                fieldVal('tx-price'),
-                fieldVal('tx-fees'),
-                fieldVal('tx-date'),
-                fieldVal('tx-notes').trim(),
-            );
-            showToast('Transaction recorded', 'success');
-            // Reset only the variable fields
-            setField('tx-qty', '0');
-            setField('tx-price', '0');
-            setField('tx-fees', '0');
-            setField('tx-notes', '');
-            await loadTransactionsList();
-            await loadHoldingsList();
+            await api.recordTransaction(ticker, type, qty, price, fees, date, null);
+            showToast(`${type === 'buy' ? 'Bought' : 'Sold'} ${fmtNum(qty)} ${ticker} @ ${fmtCurrency(price)}`, 'success');
+            fs('tx-ticker', ''); fs('tx-qty', ''); fs('tx-price', ''); fs('tx-fees', '0');
+            await loadPMTransactions();
+            await loadPMHoldings();
             await loadDashboard();
         } catch (err) { showToast(err.message, 'error'); }
     });
-
-    // Default dates
-    const today = new Date().toISOString().split('T')[0];
-    setField('tx-date', today);
-    setField('c-date', today);
-    getField('an-date') && setField('an-date', today);
 }

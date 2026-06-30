@@ -1,14 +1,16 @@
 /**
  * Analysis tab logic — Run new analyses + view history/detail.
- * Uses @material/web components.
+ * No framework dependencies. Uses patterns from ui-reference/app.js.
  */
 
 import * as api from './api.js';
-import { fmtCurrency, esc, showToast, setStatus } from './portfolio.js';
+import { fmtCurrency, fmtNum } from './portfolio.js';
+import { showToast, setStatus } from './app.js';
 
 function g(id) { return document.getElementById(id); }
 function fv(id) { const el = g(id); return el ? el.value : ''; }
 function fs(id, v) { const el = g(id); if (el) el.value = v; }
+function escHtml(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 
 // ═══════════════════════════════════════════════════════════════════════════
 // New Analysis
@@ -86,8 +88,8 @@ function renderResults(detail, ticker) {
         card.className = 'result-card';
         card.innerHTML = `
             <div class="result-card-head">
-                <span class="result-agent">${esc(item.agent_name.replace(/_/g, ' '))}</span>
-                <span class="result-type">${esc(item.output_type.replace(/_/g, ' '))}</span>
+                <span class="result-agent">${escHtml(item.agent_name.replace(/_/g, ' '))}</span>
+                <span class="result-type">${escHtml(item.output_type.replace(/_/g, ' '))}</span>
             </div>
             <div class="result-body">${item.content}</div>`;
         grid.appendChild(card);
@@ -100,85 +102,136 @@ function renderResults(detail, ticker) {
 // History
 // ═══════════════════════════════════════════════════════════════════════════
 
+let historyPage = 1;
+
 export async function loadHistory(page = 1) {
-    const tickerF = fv('hist-ticker-filter').trim();
-    const typeF = fv('hist-type-filter');
+    historyPage = page;
+    const tickerF = fv('hist-ticker').trim();
+    const typeF = fv('hist-type');
     try {
         const data = await api.getAnalysisHistory(page, 20, tickerF, typeF);
         renderHistoryTable(data);
-        renderPagination(data);
+        renderHistoryPagination(data);
     } catch (err) { showToast('Failed to load history: ' + err.message, 'error'); }
 }
 
 function renderHistoryTable(data) {
-    const tbody = g('hist-tbody');
+    const tbody = g('history-tbody');
     tbody.innerHTML = '';
     if (!data.items?.length) {
-        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--md-sys-color-on-surface-variant)">No analyses found</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No analyses found.</td></tr>';
         return;
     }
     for (const run of data.items) {
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${esc(run.analysis_date)}</td>
-            <td><strong>${esc(run.ticker)}</strong></td>
-            <td>${esc(run.analysis_type)}</td>
-            <td>${run.rating ? `<span class="rating-pill rating-${run.rating.toLowerCase()}">${esc(run.rating)}</span>` : '--'}</td>
-            <td><span class="status-chip ${run.status}">${esc(run.status)}</span></td>
-            <td><md-text-button class="view-detail-btn" data-id="${run.id}"><md-icon slot="icon">visibility</md-icon>View</md-text-button></td>`;
-        tbody.appendChild(row);
+        const rating = run.rating || 'Unknown';
+        const dateStr = run.analysis_date || '--';
+        const createdStr = run.created_at ? new Date(run.created_at + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '--';
+        const tr = document.createElement('tr');
+        tr.className = 'clickable';
+        tr.innerHTML = `
+            <td>#${run.id}</td>
+            <td><strong>${escHtml(run.ticker)}</strong></td>
+            <td>${dateStr}</td>
+            <td><span class="rating-pill rating-${rating.toLowerCase()}">${escHtml(rating)}</span></td>
+            <td><span class="status-chip ${run.status}">${escHtml(run.status)}</span></td>
+            <td>${createdStr}</td>
+            <td><span class="material-symbols-outlined" style="font-size:18px;color:var(--text-muted)">chevron_right</span></td>`;
+        tr.addEventListener('click', () => openDetailDrawer(run.id));
+        tbody.appendChild(tr);
     }
-    tbody.querySelectorAll('.view-detail-btn').forEach(btn =>
-        btn.addEventListener('click', () => openDetail(btn.dataset.id)));
 }
 
-function renderPagination(data) {
-    const el = g('hist-pagination');
+function renderHistoryPagination(data) {
+    const el = g('history-pagination');
     const total = Math.ceil(data.total / data.per_page) || 1;
     el.innerHTML = '';
     if (total <= 1) return;
 
-    const prev = document.createElement('md-outlined-button');
-    prev.textContent = 'Previous';
-    prev.disabled = data.page <= 1;
-    prev.addEventListener('click', () => loadHistory(data.page - 1));
-    el.appendChild(prev);
+    let html = '';
+    html += `<button ${data.page <= 1 ? 'disabled' : ''} onclick="window._loadHistoryPage(${data.page - 1})">← Prev</button>`;
 
-    const span = document.createElement('span');
-    span.textContent = `Page ${data.page} of ${total}`;
-    span.style.margin = '0 16px';
-    el.appendChild(span);
+    const maxButtons = 7;
+    let start = Math.max(1, data.page - Math.floor(maxButtons / 2));
+    let end = Math.min(total, start + maxButtons - 1);
+    if (end - start < maxButtons - 1) start = Math.max(1, end - maxButtons + 1);
 
-    const next = document.createElement('md-outlined-button');
-    next.textContent = 'Next';
-    next.disabled = data.page >= total;
-    next.addEventListener('click', () => loadHistory(data.page + 1));
-    el.appendChild(next);
+    for (let i = start; i <= end; i++) {
+        html += `<button class="${i === data.page ? 'active' : ''}" onclick="window._loadHistoryPage(${i})">${i}</button>`;
+    }
+
+    html += `<button ${data.page >= total ? 'disabled' : ''} onclick="window._loadHistoryPage(${data.page + 1})">Next →</button>`;
+    html += `<span class="page-info">${data.page} of ${total}</span>`;
+    el.innerHTML = html;
 }
 
 export function initHistoryTab() {
-    g('hist-refresh').addEventListener('click', () => loadHistory());
-    g('hist-ticker-filter').addEventListener('input', () => loadHistory());
-    g('hist-type-filter').addEventListener('change', () => loadHistory());
-    g('detail-close-btn').addEventListener('click', () => g('detail-dialog').close());
+    const tickerFilter = g('hist-ticker');
+    const typeFilter = g('hist-type');
+    if (tickerFilter) {
+        let timeout;
+        tickerFilter.addEventListener('input', () => {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => loadHistory(1), 300);
+        });
+    }
+    if (typeFilter) {
+        typeFilter.addEventListener('change', () => loadHistory(1));
+    }
+    // Expose for onclick pagination and refresh button
+    window._loadHistoryPage = (page) => loadHistory(page);
+    window.loadHistory = (page) => loadHistory(page);
 }
 
-async function openDetail(runId) {
+// ═══════════════════════════════════════════════════════════════════════════
+// Detail Drawer
+// ═══════════════════════════════════════════════════════════════════════════
+
+export function openDetailDrawer(runId) {
+    loadDetailIntoDrawer(runId);
+}
+
+export function closeDetailDrawer() {
+    g('detailDrawer').classList.remove('open');
+    g('detailDrawerOverlay').classList.remove('open');
+    document.body.classList.remove('drawer-open');
+}
+
+// Expose for keyboard shortcut in app.js
+window.closeDetailDrawer = closeDetailDrawer;
+
+async function loadDetailIntoDrawer(runId) {
     try {
         const detail = await api.getAnalysisDetail(runId);
-        g('detail-title').textContent = `${detail.run.ticker} — ${detail.run.analysis_date}`;
+        g('detailDrawerTitle').textContent = `${detail.run.ticker} — ${detail.run.analysis_date}`;
 
-        let html = `<div style="margin-bottom:16px">
-            <strong>Rating:</strong> <span class="rating-pill rating-${(detail.run.rating||'unknown').toLowerCase()}">${esc(detail.run.rating||'Unknown')}</span>
-            <span style="margin-left:16px"><strong>Type:</strong> ${esc(detail.run.analysis_type)}</span>
-            <span style="margin-left:16px"><strong>Status:</strong> ${esc(detail.run.status)}</span>
+        const rating = detail.run.rating || 'Unknown';
+        let html = `<div class="detail-section">
+            <h3>Summary</h3>
+            <div class="detail-row"><span class="detail-label">Rating</span><span class="detail-value"><span class="rating-pill rating-${rating.toLowerCase()}">${escHtml(rating)}</span></span></div>
+            <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value">${escHtml(detail.run.analysis_type)}</span></div>
+            <div class="detail-row"><span class="detail-label">Status</span><span class="detail-value">${escHtml(detail.run.status)}</span></div>
+            <div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">${escHtml(detail.run.analysis_date)}</span></div>
+            ${detail.run.entry_price ? `<div class="detail-row"><span class="detail-label">Entry Price</span><span class="detail-value">${fmtCurrency(detail.run.entry_price)}</span></div>` : ''}
+            ${detail.run.stop_loss ? `<div class="detail-row"><span class="detail-label">Stop Loss</span><span class="detail-value">${fmtCurrency(detail.run.stop_loss)}</span></div>` : ''}
+            ${detail.run.position_sizing ? `<div class="detail-row"><span class="detail-label">Position Sizing</span><span class="detail-value">${escHtml(detail.run.position_sizing)}</span></div>` : ''}
+            ${detail.run.error_message ? `<div class="detail-row"><span class="detail-label">Error</span><span class="detail-value" style="color:var(--danger)">${escHtml(detail.run.error_message)}</span></div>` : ''}
         </div>`;
-        for (const item of detail.results) {
+
+        html += `<div class="detail-section"><h3>Agent Outputs</h3>`;
+        for (const item of (detail.results || [])) {
             html += `<div class="result-card" style="margin-bottom:12px">
-                <div class="result-card-head"><span class="result-agent">${esc(item.agent_name.replace(/_/g,' '))}</span><span class="result-type">${esc(item.output_type.replace(/_/g,' '))}</span></div>
-                <div class="result-body">${item.content}</div></div>`;
+                <div class="result-card-head">
+                    <span class="result-agent">${escHtml(item.agent_name.replace(/_/g, ' '))}</span>
+                    <span class="result-type">${escHtml(item.output_type.replace(/_/g, ' '))}</span>
+                </div>
+                <div class="result-body">${item.content}</div>
+            </div>`;
         }
-        g('detail-body').innerHTML = html;
-        g('detail-dialog').show();
-    } catch (err) { showToast('Failed to load analysis detail', 'error'); }
+        html += `</div>`;
+
+        g('detailDrawerBody').innerHTML = html;
+        g('detailDrawer').classList.add('open');
+        g('detailDrawerOverlay').classList.add('open');
+        document.body.classList.add('drawer-open');
+    } catch (err) { showToast('Failed to load analysis detail: ' + err.message, 'error'); }
 }

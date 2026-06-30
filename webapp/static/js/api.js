@@ -39,6 +39,7 @@ export async function updateHolding(id, ticker, quantity, avgCost, sector) {
 export const deleteHolding = (id) => request(`/api/portfolio/holdings/${id}`, { method: 'DELETE' });
 export const getTransactions = (limit = 100) => request(`/api/portfolio/transactions`);
 export const getCashHistory = () => request('/api/portfolio/cash');
+export const deleteCash = (id) => request(`/api/portfolio/cash/${id}`, { method: 'DELETE' });
 
 export async function setCashBalance(amount, date) {
     return request('/api/portfolio/cash', { method: 'POST', body: JSON.stringify({ amount: Number(amount), date }) });
@@ -67,3 +68,7 @@ export async function getAnalysisHistory(page = 1, perPage = 20, ticker = '', ty
     if (type) params.set('type', type);
     return request(`/api/analysis/history?${params}`);
 }
+
+// ── Health ────────────────────────────────────────────────────────────────
+
+export const healthCheck = () => request('/api/health');
