@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-60 -900 1080 1080" width="64" height="64">
+  <style>
+    :root { --bg: #f8f9fa; --icon: #1a73e8; }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #1e1e1e; --icon: #8ab4f8; }
+    }
+    circle { fill: var(--bg); }
+    path { fill: var(--icon); }
+  </style>
+  <!-- Circle centered on the icon, large enough to fully enclose it -->
+  <circle cx="460" cy="-260" r="550" />
+  <!-- Exact Material Symbols show_chart path -->
+  <path d="m126-220-46-46 300-300 160 161 298-335 42 41-340 384-160-159-254 254Z" />
+</svg>
