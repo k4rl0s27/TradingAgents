@@ -61,7 +61,6 @@ async def add_holding(body: HoldingCreate, user: dict = Depends(get_current_user
         quantity=body.quantity,
         avg_cost=body.avg_cost,
         asset_type=body.asset_type,
-        sector=body.sector,
     )
     return StatusResponse(
         status="ok",
@@ -82,14 +81,22 @@ async def update_holding(holding_id: int, body: HoldingUpdate, user: dict = Depe
         quantity=body.quantity if body.quantity is not None else existing["quantity"],
         avg_cost=body.avg_cost if body.avg_cost is not None else existing.get("avg_cost"),
         asset_type=body.asset_type or existing.get("asset_type", "stock"),
-        sector=body.sector if body.sector is not None else existing.get("sector"),
     )
     return StatusResponse(status="ok", message=f"Holding {ticker} updated")
 
 
 @router.delete("/holdings/{holding_id}", response_model=StatusResponse)
 async def remove_holding(holding_id: int, user: dict = Depends(get_current_user)):
-    """Remove a holding."""
+    """Remove a holding.  Synced holdings cannot be deleted — disconnect SimpleFIN first."""
+    # Prevent deleting synced holdings
+    existing = await svc.get_holding_by_id(user["id"], holding_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Holding not found")
+    if existing.get("source") == "simplefin":
+        raise HTTPException(
+            status_code=403,
+            detail="Synced holdings are managed by SimpleFIN. Disconnect your brokerage to remove them.",
+        )
     deleted = await svc.delete_holding(user["id"], holding_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Holding not found")
@@ -126,7 +133,15 @@ async def record_transaction(body: TransactionCreate, user: dict = Depends(get_c
 
 @router.delete("/transactions/{tx_id}", response_model=StatusResponse)
 async def remove_transaction(tx_id: int, user: dict = Depends(get_current_user)):
-    """Delete a transaction and rebuild the affected holding."""
+    """Delete a transaction and rebuild the affected holding.  Synced transactions cannot be deleted."""
+    existing = await svc.get_transaction_by_id(user["id"], tx_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if existing.get("source") == "simplefin":
+        raise HTTPException(
+            status_code=403,
+            detail="Synced transactions are managed by SimpleFIN. Refresh your data instead.",
+        )
     deleted = await svc.delete_transaction(user["id"], tx_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Transaction not found")
@@ -137,25 +152,57 @@ async def remove_transaction(tx_id: int, user: dict = Depends(get_current_user))
 
 @router.get("/summary")
 async def get_portfolio_summary(user: dict = Depends(get_current_user)):
-    """Get full portfolio summary."""
-    from ..services.portfolio_service import build_portfolio_context
+    """Get full portfolio summary.
+
+    - total_value  = cash + current market value (what it's worth today)
+    - invested     = cash + cost basis           (money actually put in)
+    """
+    from ..services.portfolio_service import build_portfolio_context, get_current_prices
     uid = user["id"]
     holdings = await svc.get_all_holdings(uid)
     cash = await svc.get_latest_cash(uid)
-    transactions = await svc.get_transactions(uid, limit=10)
+    transactions = await svc.get_transactions(uid, limit=50)
     cash_history = await svc.get_cash_history(uid, limit=5)
     context_text = await build_portfolio_context(uid)
 
-    holdings_value = sum(
-        h["quantity"] * (h["avg_cost"] or 0) for h in holdings
-    )
+    # Cost basis (stocks only, no cash)
+    holdings_cost = sum(h["quantity"] * (h["avg_cost"] or 0) for h in holdings)
+
+    # Live market prices
+    tickers = [h["ticker"] for h in holdings]
+    prices = await get_current_prices(tickers) if tickers else {}
+
+    market_total = 0.0
+    for h in holdings:
+        cp = prices.get(h["ticker"], {})
+        h["current_price"] = cp.get("price", h["avg_cost"] or 0)
+        h["day_change"] = round(
+            h["current_price"] - cp.get("previous_close", h["current_price"]), 2
+        )
+        h["market_value"] = round(h["quantity"] * h["current_price"], 2)
+        market_total += h["market_value"]
 
     return {
         "cash": cash,
-        "holdings_value": round(holdings_value, 2),
-        "total_value": round(cash + holdings_value, 2),
+        "holdings_cost": round(holdings_cost, 2),                # cost basis of stocks
+        "market_value": round(market_total, 2),                  # live market value of stocks
+        "total_value": round(cash + market_total, 2),            # what it's worth today
+        "invested": round(cash + holdings_cost, 2),              # money actually put in
         "holdings": holdings,
-        "recent_transactions": transactions,
+        "recent_transactions": transactions[:8],
         "cash_history": cash_history,
         "context_for_agents": context_text,
     }
+
+# ── Live Prices ───────────────────────────────────────────────────────────────
+
+@router.get("/prices")
+async def get_live_prices(user: dict = Depends(get_current_user)):
+    """Get current market prices for all holdings in the portfolio."""
+    from ..services.portfolio_service import get_current_prices
+    holdings = await svc.get_all_holdings(user["id"])
+    tickers = [h["ticker"] for h in holdings]
+    if not tickers:
+        return {"prices": {}}
+    prices = await get_current_prices(tickers)
+    return {"prices": prices}

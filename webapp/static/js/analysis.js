@@ -247,10 +247,10 @@ function renderHistoryTable(data) {
             <td>#${run.id}</td>
             <td><strong>${escHtml(run.ticker)}</strong></td>
             <td><span class="material-symbols-outlined" style="font-size:16px;color:var(--text-muted)">${depthIcon}</span></td>
-            <td>${dateStr}</td>
+            <td class="date-cell">${dateStr}</td>
             <td><span class="rating-pill rating-${rating.toLowerCase()}">${escHtml(rating)}</span></td>
             <td><span class="status-chip ${run.status}">${escHtml(run.status)}</span></td>
-            <td>${createdStr}</td>
+            <td class="date-cell">${createdStr}</td>
             <td><span class="material-symbols-outlined" style="font-size:18px;color:var(--text-muted)">chevron_right</span></td>`;
         tr.addEventListener('click', () => openDetailDrawer(run.id));
         tbody.appendChild(tr);
@@ -325,13 +325,13 @@ async function loadDetailIntoDrawer(runId) {
             <div class="detail-row"><span class="detail-label">Date</span><span class="detail-value">${escHtml(detail.run.analysis_date)}</span></div>
             ${detail.run.entry_price ? `<div class="detail-row"><span class="detail-label">Entry Price</span><span class="detail-value">${fmtCurrency(detail.run.entry_price)}</span></div>` : ''}
             ${detail.run.stop_loss ? `<div class="detail-row"><span class="detail-label">Stop Loss</span><span class="detail-value">${fmtCurrency(detail.run.stop_loss)}</span></div>` : ''}
-            ${detail.run.position_sizing ? `<div class="detail-row"><span class="detail-label">Position Sizing</span><span class="detail-value">${escHtml(detail.run.position_sizing)}</span></div>` : ''}
             ${detail.run.error_message ? `<div class="detail-row"><span class="detail-label">Error</span><span class="detail-value" style="color:var(--danger)">${escHtml(detail.run.error_message)}</span></div>` : ''}
         </div>`;
 
         html += `<div class="detail-section"><h3>Agent Outputs</h3>`;
         for (const item of (detail.results || [])) {
-            html += `<div class="result-card" style="margin-bottom:12px">
+            const isPM = item.agent_name === 'portfolio_manager';
+            html += `<div class="result-card ${isPM ? 'result-card-pm' : ''}" style="margin-bottom:12px">
                 <div class="result-card-head">
                     <span class="result-agent">${escHtml(item.agent_name.replace(/_/g, ' '))}</span>
                     <span class="result-type">${escHtml(item.output_type.replace(/_/g, ' '))}</span>

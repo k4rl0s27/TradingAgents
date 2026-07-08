@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import init_db
-from .routers import portfolio, analysis, auth, settings
+from .routers import portfolio, analysis, auth, settings, simplefin
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,7 @@ app.add_middleware(
 # API routes
 app.include_router(auth.router)
 app.include_router(settings.router)
+app.include_router(simplefin.router)
 app.include_router(portfolio.router)
 app.include_router(analysis.router)
 

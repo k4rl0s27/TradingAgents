@@ -19,16 +19,17 @@
             <h1 class="app-title">TradingAgents</h1>
         </div>
         <div class="top-bar-right">
+            <span class="status-chip" id="app-status">Ready</span>
+            <span class="top-bar-divider"></span>
             <span class="user-chip hidden" id="userChip" title="Current user">
                 <span class="material-symbols-outlined">account_circle</span>
                 <span id="userName">—</span>
             </span>
-            <button class="btn-icon-only hidden" id="btnLogout" onclick="window.logout()" title="Logout">
-                <span class="material-symbols-outlined">logout</span>
-            </button>
-            <span class="status-chip" id="app-status">Ready</span>
             <button class="btn-icon-only" id="btnDarkMode" onclick="toggleDarkMode()" title="Toggle dark mode">
                 <span class="material-symbols-outlined">dark_mode</span>
+            </button>
+            <button class="btn-icon-only hidden" id="btnLogout" onclick="window.logout()" title="Sign out">
+                <span class="material-symbols-outlined">logout</span>
             </button>
         </div>
     </header>
@@ -69,8 +70,8 @@
                 <div class="card-sub">Available to trade</div>
             </div>
             <div class="card summary-card">
-                <div class="card-label">Holdings Value</div>
-                <div class="card-value holdings-color" id="sum-holdings">—</div>
+                <div class="card-label">Invested</div>
+                <div class="card-value invested-color" id="sum-invested">—</div>
                 <div class="card-sub">Cost basis</div>
             </div>
             <div class="card summary-card">
@@ -91,7 +92,7 @@
                 <div class="chart-empty hidden" id="chart-empty">No holdings to display.</div>
             </div>
             <div class="card chart-card">
-                <div class="card-label">Recent Transactions</div>
+                <div class="card-label">Recent Activity</div>
                 <div class="tx-mini-list" id="tx-mini-list">
                     <p class="empty-state">No transactions yet.</p>
                 </div>
@@ -109,10 +110,11 @@
                     <thead>
                         <tr>
                             <th>Ticker</th>
-                            <th class="num">Quantity</th>
-                            <th class="num">Avg Cost</th>
-                            <th class="num">Value</th>
-                            <th class="num">Weight</th>
+                            <th class="num col-w-qty">Qty</th>
+                            <th class="num col-w-price">Price</th>
+                            <th class="num col-w-value">Value</th>
+                            <th class="num col-w-day">Day</th>
+                            <th class="num col-w-weight">Weight</th>
                         </tr>
                     </thead>
                     <tbody id="holdings-tbody">
@@ -247,6 +249,83 @@
     <!-- ── Portfolio Manager View ── -->
     <section class="main-content hidden" id="view-portfolio">
         <div class="portfolio-stack">
+            <!-- SimpleFIN Brokerage Connection -->
+            <div class="card" id="simplefin-card">
+                <div class="orders-header sf-card-header">
+                    <h2 class="analysis-section-title sf-header-title">
+                        <span class="material-symbols-outlined sf-header-icon">link</span>
+                        Brokerage Connection
+                    </h2>
+                    <span class="order-count" id="sf-status-badge">Not connected</span>
+                </div>
+
+                <!-- State: Not Connected -->
+                <div id="sf-disconnected">
+                    <p class="sf-description">Link your brokerage account via <strong>SimpleFIN</strong> to automatically import holdings, transactions, and cash balances — no manual entry needed.</p>
+                    <button class="btn-primary" id="btn-sf-connect">
+                        <span class="material-symbols-outlined">add_link</span>
+                        Connect Brokerage
+                    </button>
+                </div>
+
+                <!-- State: Token Input (hidden) -->
+                <div id="sf-token-input" class="hidden">
+                    <p class="sf-description">1. Go to <a href="https://beta-bridge.simplefin.org/simplefin/create" target="_blank" rel="noopener">SimpleFIN Bridge</a> and sign in.<br>2. Create a token for <strong>TradingAgents</strong> and paste it here:</p>
+                    <div class="sf-token-row">
+                        <textarea id="sf-token" class="sf-textarea" placeholder="Paste your SimpleFIN token..." rows="3"></textarea>
+                        <button class="btn-primary btn-sm" id="btn-sf-claim">Claim Token</button>
+                    </div>
+                    <div class="sf-actions">
+                        <button class="btn-text" id="btn-sf-cancel">Cancel</button>
+                    </div>
+                    <div class="sf-progress hidden" id="sf-claim-progress">
+                        <div class="spinner"></div>
+                        <span>Connecting to SimpleFIN Bridge...</span>
+                    </div>
+                </div>
+
+                <!-- State: Account Selection (hidden) -->
+                <div id="sf-account-select" class="hidden">
+                    <p class="sf-description">Select the brokerage account to monitor:</p>
+                    <div class="sf-account-list" id="sf-account-list"></div>
+                    <div class="sf-actions">
+                        <button class="btn-text" id="btn-sf-back">Back</button>
+                    </div>
+                    <div class="sf-progress hidden" id="sf-link-progress">
+                        <div class="spinner"></div>
+                        <span>Linking account...</span>
+                    </div>
+                </div>
+
+                <!-- State: Connected & Linked (hidden) -->
+                <div id="sf-connected" class="hidden">
+                    <div class="sf-connected-row">
+                        <div class="sf-connected-details">
+                            <span class="material-symbols-outlined sf-org-icon">account_balance</span>
+                            <div>
+                                <div class="sf-account-name" id="sf-account-name">—</div>
+                                <div class="sf-account-org" id="sf-account-org">—</div>
+                            </div>
+                        </div>
+                        <div class="sf-sync-actions">
+                            <span class="sf-last-sync" id="sf-last-sync">Never synced</span>
+                            <button class="btn-refresh" id="btn-sf-sync">
+                                <span class="material-symbols-outlined">sync</span>
+                                Refresh
+                            </button>
+                            <button class="btn-text" id="btn-sf-disconnect">Disconnect</button>
+                        </div>
+                    </div>
+                    <div class="sf-progress hidden" id="sf-sync-progress">
+                        <div class="spinner"></div>
+                        <span id="sf-sync-text">Syncing portfolio data...</span>
+                    </div>
+                </div>
+
+                <!-- Error display -->
+                <div class="sf-error hidden" id="sf-error"></div>
+            </div>
+
             <!-- Cash Balance -->
             <div class="card">
                 <div class="orders-header">
@@ -289,7 +368,6 @@
                         <input type="text" id="hold-ticker" placeholder="Ticker" maxlength="20" required>
                         <input type="number" id="hold-qty" placeholder="Qty" step="any" min="0.0001" required>
                         <input type="number" id="hold-cost" placeholder="Avg Cost" step="0.01" min="0">
-                        <input type="text" id="hold-sector" placeholder="Sector" maxlength="50">
                     </div>
                     <button type="submit" class="btn-primary btn-sm">Save</button>
                 </form>
@@ -298,15 +376,14 @@
                         <thead>
                             <tr>
                                 <th>Ticker</th>
-                                <th class="num">Qty</th>
-                                <th class="num">Avg Cost</th>
-                                <th class="num">Value</th>
-                                <th>Sector</th>
-                                <th></th>
+                                <th class="num col-w-qty">Qty</th>
+                                <th class="num col-w-price">Avg Cost</th>
+                                <th class="num col-w-value">Value</th>
+                                <th class="col-w-action"></th>
                             </tr>
                         </thead>
                         <tbody id="pm-holdings-tbody">
-                            <tr><td colspan="6" class="empty-state">No holdings.</td></tr>
+                            <tr><td colspan="5" class="empty-state">No holdings.</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -336,14 +413,14 @@
                     <table class="orders-table">
                         <thead>
                             <tr>
-                                <th>Date</th>
+                                <th class="col-w-date">Date</th>
                                 <th>Ticker</th>
-                                <th>Type</th>
-                                <th class="num">Qty</th>
-                                <th class="num">Price</th>
-                                <th class="num">Total</th>
-                                <th class="num">Fees</th>
-                                <th></th>
+                                <th class="col-w-type">Type</th>
+                                <th class="num col-w-qty">Qty</th>
+                                <th class="num col-w-price">Price</th>
+                                <th class="num col-w-value">Total</th>
+                                <th class="num col-w-fees">Fees</th>
+                                <th class="col-w-action"></th>
                             </tr>
                         </thead>
                         <tbody id="pm-tx-tbody">

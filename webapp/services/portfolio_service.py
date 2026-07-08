@@ -5,9 +5,14 @@ Also builds the portfolio_context string injected into agent prompts.
 
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
+import yfinance as yf
+
 from ..database import get_db
+
+logger = logging.getLogger(__name__)
 
 
 # ── Cash Balance ──────────────────────────────────────────────────────────────
@@ -95,13 +100,26 @@ async def get_holding(user_id: int, ticker: str) -> Optional[dict]:
         await db.close()
 
 
+async def get_holding_by_id(user_id: int, holding_id: int) -> Optional[dict]:
+    """Get a single holding by its primary key."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM holdings WHERE id = ? AND user_id = ?",
+            (holding_id, user_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+    finally:
+        await db.close()
+
+
 async def upsert_holding(
     user_id: int,
     ticker: str,
     quantity: float,
     avg_cost: Optional[float] = None,
     asset_type: str = "stock",
-    sector: Optional[str] = None,
 ) -> dict:
     """Add or update a holding. Uses (user_id, ticker) as unique key."""
     db = await get_db()
@@ -114,16 +132,16 @@ async def upsert_holding(
         if row:
             await db.execute(
                 """UPDATE holdings
-                   SET quantity = ?, avg_cost = ?, asset_type = ?, sector = ?,
+                   SET quantity = ?, avg_cost = ?, asset_type = ?,
                        updated_at = datetime('now')
                    WHERE user_id = ? AND ticker = ?""",
-                (quantity, avg_cost, asset_type, sector, user_id, ticker.upper()),
+                (quantity, avg_cost, asset_type, user_id, ticker.upper()),
             )
         else:
             await db.execute(
-                """INSERT INTO holdings (user_id, ticker, quantity, avg_cost, asset_type, sector)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (user_id, ticker.upper(), quantity, avg_cost, asset_type, sector),
+                """INSERT INTO holdings (user_id, ticker, quantity, avg_cost, asset_type)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (user_id, ticker.upper(), quantity, avg_cost, asset_type),
             )
         await db.commit()
         return await get_holding(user_id, ticker.upper())
@@ -155,6 +173,20 @@ async def get_transactions(user_id: int, limit: int = 50) -> list[dict]:
             (user_id, limit),
         )
         return [dict(row) for row in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+
+async def get_transaction_by_id(user_id: int, tx_id: int) -> Optional[dict]:
+    """Get a single transaction by its primary key."""
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM transactions WHERE id = ? AND user_id = ?",
+            (tx_id, user_id),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
     finally:
         await db.close()
 
@@ -284,6 +316,47 @@ async def delete_transaction(user_id: int, tx_id: int) -> bool:
 
 # ── Portfolio Context Builder ─────────────────────────────────────────────────
 
+async def get_current_prices(tickers: list[str]) -> dict[str, dict]:
+    """Fetch current market prices from Yahoo Finance.
+
+    Returns a dict mapping ticker → {price, previous_close}.
+    Returns an empty dict if no data is available.
+    """
+    if not tickers:
+        return {}
+    unique = list(dict.fromkeys(t.upper() for t in tickers if t))
+    if not unique:
+        return {}
+
+    prices: dict[str, dict] = {}
+    try:
+        # Use yfinance Tickers for batch fetching
+        tickers_obj = yf.Tickers(" ".join(unique))
+        for ticker in unique:
+            try:
+                t = tickers_obj.tickers.get(ticker)
+                if t is None:
+                    continue
+                info = t.fast_info
+                price = (
+                    info.get("lastPrice")
+                    or info.get("regularMarketPreviousClose")
+                    or info.get("previousClose")
+                )
+                prev = info.get("previousClose") or price
+                if price:
+                    prices[ticker] = {
+                        "price": round(float(price), 2),
+                        "previous_close": round(float(prev), 2),
+                    }
+            except Exception:
+                logger.debug("Failed to fetch price for %s", ticker, exc_info=True)
+    except Exception:
+        logger.warning("Yahoo Finance batch fetch failed", exc_info=True)
+
+    return prices
+
+
 async def build_portfolio_context(user_id: int) -> str:
     """Build a markdown summary of the user's portfolio for agent prompts.
 
@@ -323,19 +396,6 @@ async def build_portfolio_context(user_id: int) -> str:
                 f"| {h['ticker']} | {h['quantity']:,.2f} | "
                 f"${h['avg_cost']:,.2f} | ${val:,.2f} | {weight_pct:.1f}% |"
             )
-
-        # Sector concentration warning
-        sectors = {}
-        for h, val in holding_summaries:
-            sector = h.get("sector") or "Unknown"
-            sectors[sector] = sectors.get(sector, 0) + val
-        if sectors:
-            lines.append("\n### Sector Exposure")
-            for sector, val in sorted(sectors.items(), key=lambda x: x[1], reverse=True):
-                pct = (val / total_value * 100) if total_value > 0 else 0
-                lines.append(f"- {sector}: {pct:.1f}%")
-                if pct > 30:
-                    lines.append(f"  ⚠️ **Concentration Risk**: {sector} exceeds 30% of portfolio")
 
     # Recent transactions context
     recent_txs = await get_transactions(user_id, limit=5)

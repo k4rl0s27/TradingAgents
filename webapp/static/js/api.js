@@ -44,17 +44,17 @@ export const initializeSettings = (body) => request('/api/settings/initialize', 
 export const getPortfolioSummary = () => request('/api/portfolio/summary');
 export const getHoldings = () => request('/api/portfolio/holdings');
 
-export async function addHolding(ticker, quantity, avgCost, sector) {
+export async function addHolding(ticker, quantity, avgCost) {
     return request('/api/portfolio/holdings', {
         method: 'POST',
-        body: JSON.stringify({ ticker, quantity: Number(quantity), avg_cost: avgCost ? Number(avgCost) : null, sector: sector || null, asset_type: 'stock' }),
+        body: JSON.stringify({ ticker, quantity: Number(quantity), avg_cost: avgCost ? Number(avgCost) : null, asset_type: 'stock' }),
     });
 }
 
-export async function updateHolding(id, ticker, quantity, avgCost, sector) {
+export async function updateHolding(id, ticker, quantity, avgCost) {
     return request(`/api/portfolio/holdings/${id}`, {
         method: 'PUT',
-        body: JSON.stringify({ ticker, quantity: Number(quantity), avg_cost: avgCost ? Number(avgCost) : null, sector: sector || null }),
+        body: JSON.stringify({ ticker, quantity: Number(quantity), avg_cost: avgCost ? Number(avgCost) : null }),
     });
 }
 
@@ -94,3 +94,21 @@ export async function getAnalysisHistory(page = 1, perPage = 20, ticker = '', ty
 // ── Health ────────────────────────────────────────────────────────────────
 
 export const healthCheck = () => request('/api/health');
+
+// ── SimpleFIN ─────────────────────────────────────────────────────────────
+
+export const simplefinConnect = (token) => request('/api/simplefin/connect', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+});
+
+export const simplefinLink = (accountId, accountName, orgName, orgDomain) => request('/api/simplefin/link', {
+    method: 'POST',
+    body: JSON.stringify({ account_id: accountId, account_name: accountName, org_name: orgName || '', org_domain: orgDomain || '' }),
+});
+
+export const simplefinSync = () => request('/api/simplefin/sync', { method: 'POST' });
+
+export const simplefinStatus = () => request('/api/simplefin/status');
+
+export const simplefinDisconnect = () => request('/api/simplefin/disconnect', { method: 'DELETE' });

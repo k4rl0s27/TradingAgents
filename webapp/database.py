@@ -11,7 +11,7 @@ DB_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DB_DIR / "trading.db"
 
 # Schema version tracking table
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -29,11 +29,28 @@ async def init_db() -> None:
     db = await get_db()
     try:
         await db.executescript(_SCHEMA_SQL)
-        # Migrations for existing databases
+        # Migrations for existing databases (v1 → v2)
         try:
             await db.execute("ALTER TABLE analysis_runs ADD COLUMN analysis_depth TEXT NOT NULL DEFAULT 'medium'")
         except Exception:
             pass  # Column already exists
+        # Migrations for v2 → v3: SimpleFIN source tracking columns
+        try:
+            await db.execute("ALTER TABLE holdings ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE holdings ADD COLUMN simplefin_holding_id TEXT")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE transactions ADD COLUMN simplefin_transaction_id TEXT")
+        except Exception:
+            pass
         await db.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
             (SCHEMA_VERSION,),
@@ -76,7 +93,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Current portfolio holdings (manual entry)
+-- Current portfolio holdings (manual entry or SimpleFIN sync)
 CREATE TABLE IF NOT EXISTS holdings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -84,13 +101,14 @@ CREATE TABLE IF NOT EXISTS holdings (
     asset_type TEXT NOT NULL DEFAULT 'stock',
     quantity REAL NOT NULL DEFAULT 0,
     avg_cost REAL,
-    sector TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    simplefin_holding_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
     UNIQUE(user_id, ticker)
 );
 
--- Record of all buy/sell executions
+-- Record of all buy/sell executions (manual entry or SimpleFIN sync)
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -102,6 +120,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     fees REAL DEFAULT 0,
     date TEXT NOT NULL,
     notes TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    simplefin_transaction_id TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -161,6 +181,27 @@ CREATE TABLE IF NOT EXISTS options_analysis (
     max_loss REAL,
     breakeven REAL,
     greeks_json TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- SimpleFIN connection (encrypted Access URL per user)
+CREATE TABLE IF NOT EXISTS simplefin_connections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    access_url_encrypted TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Which SimpleFIN account the user chose to monitor
+CREATE TABLE IF NOT EXISTS simplefin_linked_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    simplefin_account_id TEXT NOT NULL,
+    account_name TEXT NOT NULL,
+    org_name TEXT,
+    org_domain TEXT,
+    last_synced_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 """

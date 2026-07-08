@@ -17,7 +17,6 @@ class HoldingCreate(BaseModel):
     asset_type: str = Field(default="stock", description="Asset type: stock, crypto")
     quantity: float = Field(..., gt=0, description="Number of shares/coins")
     avg_cost: Optional[float] = Field(default=None, ge=0, description="Average cost basis per share")
-    sector: Optional[str] = Field(default=None, description="Sector classification")
 
 
 class HoldingUpdate(BaseModel):
@@ -25,7 +24,6 @@ class HoldingUpdate(BaseModel):
     asset_type: Optional[str] = None
     quantity: Optional[float] = Field(default=None, gt=0)
     avg_cost: Optional[float] = Field(default=None, ge=0)
-    sector: Optional[str] = None
 
 
 class HoldingResponse(BaseModel):
@@ -34,7 +32,7 @@ class HoldingResponse(BaseModel):
     asset_type: str
     quantity: float
     avg_cost: Optional[float]
-    sector: Optional[str]
+    source: str = "manual"
     created_at: str
     updated_at: str
 
@@ -61,6 +59,7 @@ class TransactionResponse(BaseModel):
     fees: float
     date: str
     notes: Optional[str]
+    source: str = "manual"
     created_at: str
 
 
@@ -148,3 +147,41 @@ class AnalysisHistoryResponse(BaseModel):
 class StatusResponse(BaseModel):
     status: str
     message: str
+
+
+# ── SimpleFIN ─────────────────────────────────────────────────────────────────
+
+class SimpleFINConnectRequest(BaseModel):
+    token: str = Field(..., min_length=1, description="Base64-encoded SimpleFIN Token")
+
+
+class SimpleFINAccountOption(BaseModel):
+    account_id: str
+    name: str
+    currency: str
+    org_name: str
+    org_domain: str
+
+
+class SimpleFINAccountListResponse(BaseModel):
+    accounts: list[SimpleFINAccountOption]
+
+
+class SimpleFINLinkRequest(BaseModel):
+    account_id: str = Field(..., min_length=1)
+    account_name: str = Field(..., min_length=1)
+    org_name: str = ""
+    org_domain: str = ""
+
+
+class SimpleFINSyncResponse(BaseModel):
+    status: str
+    holdings_synced: int
+    transactions_synced: int
+    cash_balance: float
+    last_synced_at: str
+
+
+class SimpleFINStatusResponse(BaseModel):
+    connected: bool
+    linked_account: Optional[dict] = None

@@ -222,17 +222,16 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
             rating = _extract_rating(final_state.get("final_trade_decision", ""))
             entry_price = _extract_entry_price(final_state.get("trader_investment_plan", ""))
             stop_loss = _extract_stop_loss(final_state.get("trader_investment_plan", ""))
-            position_sizing = _extract_position_sizing(final_state.get("trader_investment_plan", ""))
 
             loop.call_soon_threadsafe(
                 queue.put_nowait,
                 {"type": "complete", "rating": rating, "entry_price": entry_price,
-                 "stop_loss": stop_loss, "position_sizing": position_sizing},
+                 "stop_loss": stop_loss},
             )
 
-            return final_state, rating, entry_price, stop_loss, position_sizing
+            return final_state, rating, entry_price, stop_loss
 
-        final_state, rating, entry_price, stop_loss, position_sizing = await loop.run_in_executor(
+        final_state, rating, entry_price, stop_loss = await loop.run_in_executor(
             None, _stream_and_collect,
         )
 
@@ -248,9 +247,9 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
         await db.execute(
             """UPDATE analysis_runs
                SET status = 'completed', rating = ?, entry_price = ?, stop_loss = ?,
-                   position_sizing = ?, completed_at = datetime('now')
+                   completed_at = datetime('now')
                WHERE id = ?""",
-            (rating, entry_price, stop_loss, position_sizing, run_id),
+            (rating, entry_price, stop_loss, run_id),
         )
         await db.commit()
 
@@ -493,10 +492,11 @@ async def get_analysis_detail(run_id: int) -> Optional[dict]:
 
 # Order mirrors the agent execution flow
 _AGENT_OUTPUT_KEYS = [
-    ("market_analyst", "market_report", "report"),
-    ("sentiment_analyst", "sentiment_report", "report"),
-    ("news_analyst", "news_report", "report"),
-    ("fundamentals_analyst", "fundamentals_report", "report"),
+    ("portfolio_manager", "final_trade_decision", "structured_decision"),
+    ("market_analyst", "market_report", "market"),
+    ("sentiment_analyst", "sentiment_report", "sentiment"),
+    ("news_analyst", "news_report", "news"),
+    ("fundamentals_analyst", "fundamentals_report", "fundamentals"),
     ("bull_researcher", "investment_debate_state", "bull_debate"),
     ("bear_researcher", "investment_debate_state", "bear_debate"),
     ("research_manager", "investment_plan", "structured_decision"),
@@ -504,7 +504,6 @@ _AGENT_OUTPUT_KEYS = [
     ("aggressive_risk", "risk_debate_state", "risk_debate"),
     ("conservative_risk", "risk_debate_state", "risk_debate"),
     ("neutral_risk", "risk_debate_state", "risk_debate"),
-    ("portfolio_manager", "final_trade_decision", "structured_decision"),
 ]
 
 
@@ -546,8 +545,22 @@ def _extract_results(final_state: dict) -> list[dict]:
 
 
 def _extract_rating(text: str) -> str:
-    """Extract 5-tier rating from final decision text."""
+    """Extract 5-tier rating from the Portfolio Manager's structured output.
+
+    The PM renders ``**Rating**: Buy`` as its first line.  We anchor on that
+    exact pattern so we never accidentally pick up a rating word from an
+    embedded analyst quote (e.g. the Research Manager's recommendation).
+    """
     import re
+    # Primary: structured Portfolio Manager format
+    match = re.search(
+        r"\*\*Rating\*\*:\s*(Buy|Overweight|Hold|Underweight|Sell)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1)
+    # Fallback: any rating word (legacy free-text output)
     for rating in ["Buy", "Overweight", "Hold", "Underweight", "Sell"]:
         if re.search(rf"\b{rating}\b", text, re.IGNORECASE):
             return rating
@@ -568,8 +581,4 @@ def _extract_stop_loss(text: str) -> Optional[float]:
     return float(match.group(1).replace(",", "")) if match else None
 
 
-def _extract_position_sizing(text: str) -> Optional[str]:
-    """Extract position sizing guidance from trader plan."""
-    import re
-    match = re.search(r"[Pp]osition\s*[Ss]iz(?:e|ing)[:\s]*(.+?)(?:\n|$)", text)
-    return match.group(1).strip()[:200] if match else None
+

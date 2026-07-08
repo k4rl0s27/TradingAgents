@@ -19,14 +19,40 @@ function fv(id) { const el = g(id); return el ? el.value : ''; }
 function fs(id, v) { const el = g(id); if (el) el.value = v; }
 
 let allocationChart = null;
+let _lastChartKey = null;
+let _dashboardPromise = null;
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Dashboard
 // ═══════════════════════════════════════════════════════════════════════════
 
+/** Cached last summary so view-switch renders instantly while fresh data loads. */
+let _lastSummary = null;
+
+/**
+ * Return the last known summary (or null).  Used by ``switchView`` so the
+ * dashboard never shows the "empty" state on tab change.
+ */
+export function getLastSummary() {
+    return _lastSummary;
+}
+
 export async function loadDashboard() {
+    // If a request is already in-flight, return its promise (deduplicate)
+    if (_dashboardPromise) return _dashboardPromise;
+
+    _dashboardPromise = _doLoadDashboard();
+    try {
+        return await _dashboardPromise;
+    } finally {
+        _dashboardPromise = null;
+    }
+}
+
+async function _doLoadDashboard() {
     try {
         const s = await api.getPortfolioSummary();
+        _lastSummary = s;
         renderSummaryCards(s);
         renderHoldingsTable(s.holdings, s.total_value);
         renderAllocationChart(s.holdings, s.total_value, s.cash);
@@ -38,10 +64,23 @@ export async function loadDashboard() {
     }
 }
 
-function renderSummaryCards(s) {
+/**
+ * Instant-render from cached data so view switches never show the empty state.
+ * Called synchronously by ``switchView``.  ``loadDashboard()`` still fetches
+ * fresh data in the background.
+ */
+export function paintDashboardFromCache() {
+    if (!_lastSummary) return;
+    renderSummaryCards(_lastSummary);
+    renderHoldingsTable(_lastSummary.holdings, _lastSummary.total_value);
+    renderAllocationChart(_lastSummary.holdings, _lastSummary.total_value, _lastSummary.cash);
+    renderDashboardTransactions(_lastSummary.recent_transactions);
+}
+
+export function renderSummaryCards(s) {
     g('sum-total').textContent = fmtCurrency(s.total_value);
     g('sum-cash').textContent = fmtCurrency(s.cash);
-    g('sum-holdings').textContent = fmtCurrency(s.holdings_value);
+    g('sum-invested').textContent = fmtCurrency(s.invested ?? (s.cash + (s.holdings_cost ?? s.holdings_value ?? 0)));
     g('sum-positions').textContent = s.holdings.length;
     g('sum-positions-sub').textContent = s.holdings.length + ' active holding' + (s.holdings.length !== 1 ? 's' : '');
 }
@@ -49,20 +88,25 @@ function renderSummaryCards(s) {
 function renderHoldingsTable(holdings, totalValue) {
     const tbody = g('holdings-tbody');
     if (!holdings.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No holdings yet. Add positions in Portfolio Manager.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No holdings yet. Add positions in Portfolio Manager.</td></tr>';
         g('holdings-count').textContent = '0 positions';
         return;
     }
     g('holdings-count').textContent = holdings.length + ' position' + (holdings.length !== 1 ? 's' : '');
 
     tbody.innerHTML = holdings.map(h => {
-        const val = h.quantity * (h.avg_cost || 0);
+        const price = h.current_price || h.avg_cost || 0;
+        const val = h.market_value || (h.quantity * price);
+        const day = h.day_change || 0;
         const w = totalValue > 0 ? (val / totalValue * 100).toFixed(1) : '0.0';
+        const dayCls = day >= 0 ? 'change-up' : 'change-down';
+        const daySign = day >= 0 ? '+' : '';
         return `<tr>
             <td><strong>${escHtml(h.ticker)}</strong></td>
             <td class="num">${fmtNum(h.quantity)}</td>
-            <td class="num">${h.avg_cost ? fmtCurrency(h.avg_cost) : '--'}</td>
+            <td class="num">${price ? fmtCurrency(price) : '--'}</td>
             <td class="num">${fmtCurrency(val)}</td>
+            <td class="num ${dayCls}">${daySign}${fmtCurrency(day)}</td>
             <td class="num">${w}%</td></tr>`;
     }).join('');
 }
@@ -70,15 +114,22 @@ function renderHoldingsTable(holdings, totalValue) {
 function renderAllocationChart(holdings, totalValue, cash) {
     const canvas = g('allocation-chart');
     const empty = g('chart-empty');
-    if (allocationChart) { allocationChart.destroy(); allocationChart = null; }
 
     const segs = [], labels = [];
     const colors = ['#D0BCFF','#7ADDA0','#FFB4AB','#A8C7FA','#FFD699','#CCC2DC','#B4E5F9','#F2B8B5','#C5E1A5','#FFE082','#FFAB91','#80CBC4'];
     if (cash > 0) { segs.push(cash); labels.push('Cash'); }
     for (const h of holdings) {
-        const v = h.quantity * (h.avg_cost || 0);
+        const v = h.market_value || (h.quantity * (h.avg_cost || 0));
         if (v > 0) { segs.push(v); labels.push(h.ticker); }
     }
+
+    // Skip recreation if the chart data hasn't changed
+    const chartKey = `${cash}|${segs.join(',')}`;
+    if (_lastChartKey === chartKey && allocationChart) return;
+    _lastChartKey = chartKey;
+
+    if (allocationChart) { allocationChart.destroy(); allocationChart = null; }
+
     if (!segs.length) { canvas.style.display = 'none'; g('chart-legend').classList.add('hidden'); empty.classList.remove('hidden'); return; }
     canvas.style.display = 'block'; empty.classList.add('hidden');
 
@@ -88,6 +139,7 @@ function renderAllocationChart(holdings, totalValue, cash) {
         data: { labels, datasets: [{ data: segs, backgroundColor: colors.slice(0, segs.length), borderColor: isDark ? '#2d2d2d' : '#ffffff', borderWidth: 2 }] },
         options: {
             responsive: true, maintainAspectRatio: true,
+            animation: false,
             plugins: { legend: { display: false } },
         },
     });
@@ -109,13 +161,16 @@ function renderDashboardTransactions(txs) {
         container.innerHTML = '<p class="empty-state">No transactions yet.</p>';
         return;
     }
-    for (const tx of txsslice(0, 10)) {
+    const recent = txs.slice(0, 5);
+    for (const tx of recent) {
         const isBuy = tx.transaction_type === 'buy';
         const dateStr = tx.date ? new Date(tx.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '--';
+        const total = tx.total_amount || (tx.quantity * tx.price);
         container.innerHTML += `<div class="tx-mini-item">
             <span class="tx-mini-ticker">${escHtml(tx.ticker)}</span>
             <span class="tx-mini-type ${tx.transaction_type}">${isBuy ? 'Buy' : 'Sell'}</span>
             <span class="tx-mini-details">${fmtNum(tx.quantity)} @ ${fmtCurrency(tx.price)}</span>
+            <span class="tx-mini-total">${fmtCurrency(total)}</span>
             <span class="tx-mini-date">${dateStr}</span>
         </div>`;
     }
@@ -202,7 +257,7 @@ async function loadPMHoldings() {
         const count = g('pm-holdings-count');
         tbody.innerHTML = '';
         if (!holdings.length) {
-            tbody.innerHTML = '<tr><td colspan="6" class="empty-state">No holdings.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No holdings.</td></tr>';
             count.textContent = '0 positions';
             return;
         }
@@ -210,17 +265,20 @@ async function loadPMHoldings() {
 
         for (const h of holdings) {
             const val = h.quantity * (h.avg_cost || 0);
+            const isManual = h.source !== 'simplefin';
             const tr = document.createElement('tr');
             tr.innerHTML = `
-                <td><strong>${escHtml(h.ticker)}</strong></td>
+                <td>
+                    <strong>${escHtml(h.ticker)}</strong>
+                    ${isManual ? '<span class="source-badge" title="Manually entered">manual</span>' : ''}
+                </td>
                 <td class="num">${fmtNum(h.quantity)}</td>
                 <td class="num">${h.avg_cost ? fmtCurrency(h.avg_cost) : '--'}</td>
                 <td class="num">${fmtCurrency(val)}</td>
-                <td>${escHtml(h.sector || '--')}</td>
                 <td>
-                    <button class="btn-delete-row" title="Delete ${escHtml(h.ticker)}" data-delete-holding="${h.id}" data-ticker="${escHtml(h.ticker)}">
+                    ${isManual ? `<button class="btn-delete-row" title="Delete ${escHtml(h.ticker)}" data-delete-holding="${h.id}" data-ticker="${escHtml(h.ticker)}">
                         <span class="material-symbols-outlined">delete</span>
-                    </button>
+                    </button>` : ''}
                 </td>`;
             tbody.appendChild(tr);
         }
@@ -248,12 +306,11 @@ export function initHoldingForm() {
         const ticker = fv('hold-ticker').trim().toUpperCase();
         const qty = fv('hold-qty');
         const cost = fv('hold-cost');
-        const sector = fv('hold-sector').trim();
         if (!ticker || !qty) { showToast('Ticker and quantity are required', 'error'); return; }
         try {
-            await api.addHolding(ticker, qty, cost || null, sector || null);
+            await api.addHolding(ticker, qty, cost || null);
             showToast(`Holding ${ticker} saved`, 'success');
-            fs('hold-ticker', ''); fs('hold-qty', ''); fs('hold-cost', ''); fs('hold-sector', '');
+            fs('hold-ticker', ''); fs('hold-qty', ''); fs('hold-cost', '');
             await loadPMHoldings();
             await loadDashboard();
         } catch (err) { showToast(err.message, 'error'); }
@@ -276,6 +333,7 @@ async function loadPMTransactions() {
         count.textContent = txs.length + ' transaction' + (txs.length !== 1 ? 's' : '');
 
         for (const tx of txs) {
+            const isManual = tx.source !== 'simplefin';
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td>${escHtml(tx.date)}</td>
@@ -286,9 +344,9 @@ async function loadPMTransactions() {
                 <td class="num">${fmtCurrency(tx.total_amount)}</td>
                 <td class="num">${fmtCurrency(tx.fees)}</td>
                 <td>
-                    <button class="btn-delete-row" title="Delete transaction" data-delete-tx="${tx.id}" data-ticker="${escHtml(tx.ticker)}">
+                    ${isManual ? `<button class="btn-delete-row" title="Delete transaction" data-delete-tx="${tx.id}" data-ticker="${escHtml(tx.ticker)}">
                         <span class="material-symbols-outlined">delete</span>
-                    </button>
+                    </button>` : ''}
                 </td>`;
             tbody.appendChild(tr);
         }

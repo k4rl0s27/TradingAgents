@@ -4,9 +4,10 @@
  * No framework dependencies — uses patterns from ui-reference/app.js.
  */
 
-import { loadDashboard, initCashForm, initHoldingForm, initTxForm, loadPortfolioManager } from './portfolio.js';
+import { loadDashboard, initCashForm, initHoldingForm, initTxForm, loadPortfolioManager, paintDashboardFromCache } from './portfolio.js';
 import { initAnalysisForm, loadHistory, initHistoryTab, reconnectRunningAnalysis } from './analysis.js';
 import { initAuth, logout, isAuthenticated, isInitialized } from './auth.js';
+import { initSimpleFIN } from './simplefin.js';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Toast
@@ -54,11 +55,14 @@ export function switchView(name) {
         el.classList.toggle('active', el.dataset.view === name);
     });
 
-    // Load view data
+    // Load view data — dashboard renders instantly from cache, then refreshes
     switch (name) {
-        case 'dashboard': loadDashboard(); break;
+        case 'dashboard':
+            paintDashboardFromCache();  // synchronous — no flash
+            loadDashboard();            // fetch fresh data in background
+            break;
         case 'analysis': loadHistory(); reconnectRunningAnalysis(); break;
-        case 'portfolio': loadPortfolioManager(); break;
+        case 'portfolio': import('./simplefin.js').then(m => m.initSimpleFIN()); loadPortfolioManager(); break;
     }
 
     // Update URL hash
@@ -153,6 +157,7 @@ async function init() {
     initCashForm();
     initHoldingForm();
     initTxForm();
+    initSimpleFIN();
 
     // Check auth — if OIDC is configured, this will redirect to login.
     // If OIDC is not configured, the app runs without auth.
