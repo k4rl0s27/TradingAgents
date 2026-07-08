@@ -868,20 +868,6 @@ html.dark .form-field input[type="date"] { color-scheme: dark; }
     color: var(--accent);
 }
 
-#sf-status-badge {
-    font-size: 12px;
-    font-weight: 500;
-    padding: 3px 10px;
-    border-radius: 12px;
-    background: var(--surface-variant);
-    color: var(--text-secondary);
-}
-
-#sf-status-badge.connected {
-    background: var(--success-light);
-    color: var(--success);
-}
-
 .sf-description {
     font-size: 14px;
     color: var(--text-secondary);

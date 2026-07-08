@@ -344,7 +344,6 @@ async def stream_analysis_events(run_id: int):
                 "rating": event["rating"],
                 "entry_price": event["entry_price"],
                 "stop_loss": event["stop_loss"],
-                "position_sizing": event["position_sizing"],
             })
             yield f"event: complete\ndata: {data}\n\n"
         elif event["type"] == "error":

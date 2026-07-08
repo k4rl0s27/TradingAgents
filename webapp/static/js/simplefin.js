@@ -85,9 +85,6 @@ function showDisconnected() {
     hide('sf-token-input', 'sf-account-select', 'sf-connected', 'sf-error',
          'sf-claim-progress', 'sf-link-progress', 'sf-sync-progress');
     show('sf-disconnected');
-    const badge = g('sf-status-badge');
-    badge.textContent = 'Not connected';
-    badge.className = 'order-count';
 }
 
 function showTokenInput() {
@@ -137,10 +134,6 @@ function renderConnected(linked) {
 
     g('sf-account-name').textContent = linked.name || linked.account_name || '—';
     g('sf-account-org').textContent = linked.org_name || linked.org_domain || '—';
-
-    const badge = g('sf-status-badge');
-    badge.textContent = 'Connected';
-    badge.className = 'order-count connected';
 
     updateLastSync(linked.last_synced_at);
 }
