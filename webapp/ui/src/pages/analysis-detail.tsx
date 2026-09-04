@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
 import { RatingBadge, StatusBadge } from "./analysis"
-import { formatDate, formatMoney } from "@/lib/utils"
+import { formatDate, formatMoney, prettifyAgentName } from "@/lib/utils"
 
 interface LiveEvent {
   type: "agent" | "status" | "complete" | "error"
@@ -194,7 +194,7 @@ export default function AnalysisDetailPage() {
             <Card key={r.id}>
               <CardHeader className="pb-2">
                 <CardTitle className="flex items-center gap-2 text-sm">
-                  {r.agent_name} <Badge variant="outline" className="text-[10px]">{r.output_type}</Badge>
+                  {prettifyAgentName(r.agent_name)} <Badge variant="outline" className="text-[10px]">{r.output_type}</Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>

@@ -18,6 +18,7 @@ Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearc
 - UI production build: from `webapp/ui`: `npm run build` → wipes and rewrites `webapp/static` (**commit the result** — pip/Docker serve it without Node). UI lint: `npm run lint` (oxlint; warnings tolerated, keep zero errors).
 - Adding shadcn components: `npx shadcn@latest add <name>` — the CLI writes to a literal `@/` folder at `webapp/ui` root (it does not resolve the tsconfig alias); move files into `src/components/ui/`.
 - PWA icons are generated (no image toolchain): `python scripts/gen_pwa_icons.py` from the repo root — only needed when changing `webapp/ui/public` branding.
+- Demo data for dev (`WEBAPP_DEV_AUTOLOGIN` mode): `python scripts/seed_demo.py` from the repo root (requires `SECRET_KEY` set; wipes and re-seeds only the "Local Dev" user — holdings, cash, transactions, sample analyses). The dev identity constant lives in `webapp/routers/auth.py` (`_DEV_SUB`) and is duplicated in the seeder — keep in sync.
 - CLI: `tradingagents` or `python -m cli.main`.
 - Tests: `pytest` (CI runs the whole suite; all markers — including `integration`/`smoke` — run by default). Focused: `pytest -m unit`.
 - Lint (the CI gate): `ruff check .` — keep the whole repo clean under the strict select (E501 ignored, line-length 100). Do **not** run `ruff format` repo-wide; formatter adoption is deliberately deferred per the pyproject comment.
