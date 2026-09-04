@@ -1,6 +1,7 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    opponent_argument_or_opening,
 )
 
 
@@ -10,23 +11,20 @@ def create_neutral_debator(llm):
         history = risk_debate_state.get("history", "")
         neutral_history = risk_debate_state.get("neutral_history", "")
 
-        current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
-        current_conservative_response = risk_debate_state.get("current_conservative_response", "")
+        current_aggressive_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_aggressive_response", ""), "aggressive analyst"
+        )
+        current_conservative_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_conservative_response", ""), "conservative analyst"
+        )
 
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
-        portfolio_context = state.get("portfolio_context", "")
 
         trader_decision = state["trader_investment_plan"]
-
-        portfolio_section = (
-            f"\n\n**Current Portfolio State:**\n{portfolio_context}\n"
-            if portfolio_context
-            else ""
-        )
 
         prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
 
@@ -34,7 +32,7 @@ def create_neutral_debator(llm):
 
 Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
 
-{instrument_context}{portfolio_section}
+{instrument_context}
 Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}

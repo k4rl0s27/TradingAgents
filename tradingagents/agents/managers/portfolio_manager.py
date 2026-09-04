@@ -16,6 +16,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
 )
 from tradingagents.agents.utils.structured import (
+    NO_EXTERNAL_TOOLS,
     bind_structured,
     invoke_structured_or_freetext,
 )
@@ -33,17 +34,9 @@ def create_portfolio_manager(llm):
         trader_plan = state["trader_investment_plan"]
 
         past_context = state.get("past_context", "")
-        portfolio_context = state.get("portfolio_context", "")
-
         lessons_line = (
             f"- Lessons from prior decisions and outcomes:\n{past_context}\n"
             if past_context
-            else ""
-        )
-
-        portfolio_line = (
-            f"\n**Your Current Portfolio:**\n{portfolio_context}\n"
-            if portfolio_context
             else ""
         )
 
@@ -63,13 +56,15 @@ def create_portfolio_manager(llm):
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
-{lessons_line}{portfolio_line}
+{lessons_line}
 **Risk Analysts Debate History:**
 {history}
 
 ---
 
-Be decisive and ground every conclusion in specific evidence from the analysts. When a real portfolio is provided, factor in existing positions, sector concentration, available cash, and how this trade would affect overall portfolio risk.{get_language_instruction()}"""
+Ground every conclusion in specific evidence from the analysts. Commit to a directional call only when the evidence clearly supports one; choose Hold when the case is balanced, materially conflicting, ambiguous, or insufficient to justify changing exposure, rather than forcing a direction to appear decisive. Weigh the analysts on their merits, independent of speaking order.
+
+{NO_EXTERNAL_TOOLS}{get_language_instruction()}"""
 
         final_trade_decision = invoke_structured_or_freetext(
             structured_llm,

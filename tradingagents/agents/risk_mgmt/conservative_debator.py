@@ -1,6 +1,7 @@
 from tradingagents.agents.utils.agent_utils import (
     get_instrument_context_from_state,
     get_language_instruction,
+    opponent_argument_or_opening,
 )
 
 
@@ -10,23 +11,20 @@ def create_conservative_debator(llm):
         history = risk_debate_state.get("history", "")
         conservative_history = risk_debate_state.get("conservative_history", "")
 
-        current_aggressive_response = risk_debate_state.get("current_aggressive_response", "")
-        current_neutral_response = risk_debate_state.get("current_neutral_response", "")
+        current_aggressive_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_aggressive_response", ""), "aggressive analyst"
+        )
+        current_neutral_response = opponent_argument_or_opening(
+            risk_debate_state.get("current_neutral_response", ""), "neutral analyst"
+        )
 
         market_research_report = state["market_report"]
         sentiment_report = state["sentiment_report"]
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
         instrument_context = get_instrument_context_from_state(state)
-        portfolio_context = state.get("portfolio_context", "")
 
         trader_decision = state["trader_investment_plan"]
-
-        portfolio_section = (
-            f"\n\n**Current Portfolio State:**\n{portfolio_context}\n"
-            if portfolio_context
-            else ""
-        )
 
         prompt = f"""As the Conservative Risk Analyst, your primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth. You prioritize stability, security, and risk mitigation, carefully assessing potential losses, economic downturns, and market volatility. When evaluating the trader's decision or plan, critically examine high-risk elements, pointing out where the decision may expose the firm to undue risk and where more cautious alternatives could secure long-term gains. Here is the trader's decision:
 
@@ -34,7 +32,7 @@ def create_conservative_debator(llm):
 
 Your task is to actively counter the arguments of the Aggressive and Neutral Analysts, highlighting where their views may overlook potential threats or fail to prioritize sustainability. Respond directly to their points, drawing from the following data sources to build a convincing case for a low-risk approach adjustment to the trader's decision:
 
-{instrument_context}{portfolio_section}
+{instrument_context}
 Market Research Report: {market_research_report}
 Social Media Sentiment Report: {sentiment_report}
 Latest World Affairs Report: {news_report}
