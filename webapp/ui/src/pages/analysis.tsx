@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { Eye, Play, Sparkles } from "lucide-react"
+import { Eye, Play } from "lucide-react"
 import { api } from "@/api/client"
 import type { AnalysisDepth, AnalysisDetail, AnalysisRun } from "@/api/types"
-import { AnalysisResults } from "@/components/analysis-results"
+import { AnalysisResults, RunStats } from "@/components/analysis-results"
 import { DateField } from "@/components/date-field"
 import { RatingBadge, StatusBadge } from "@/components/rating-badge"
 import { Button } from "@/components/ui/button"
@@ -117,11 +117,10 @@ function AnalysisDetailDialog({ run, onClose }: { run: AnalysisRun; onClose: () 
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="flex max-h-[88dvh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
-        <DialogHeader className="border-b px-5 py-4 sm:px-6">
+      <DialogContent className="flex max-h-[88dvh] w-full max-w-5xl flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+        <DialogHeader className="border-b px-5 py-4 pr-14 sm:px-6">
           <div className="flex items-center gap-2">
             <DialogTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="size-4 text-violet-500" aria-hidden />
               {run.ticker}
               <span className="font-normal text-muted-foreground">
                 · {formatDate(run.analysis_date)} · {run.analysis_depth}
@@ -129,7 +128,6 @@ function AnalysisDetailDialog({ run, onClose }: { run: AnalysisRun; onClose: () 
             </DialogTitle>
             <div className="ml-auto flex items-center gap-2">
               <StatusBadge status={run.status} />
-              <RatingBadge rating={run.rating} />
             </div>
           </div>
         </DialogHeader>
@@ -138,10 +136,20 @@ function AnalysisDetailDialog({ run, onClose }: { run: AnalysisRun; onClose: () 
             <p className="py-8 text-center text-sm text-red-500">{error}</p>
           ) : !detail ? (
             <Skeleton className="h-64 w-full" />
-          ) : detail.results.length === 0 ? (
-            <p className="py-8 text-center text-sm text-muted-foreground">No agent outputs stored for this run.</p>
           ) : (
-            <AnalysisResults results={detail.results} run={run} />
+            <>
+              {detail.run.status === "completed" && <RunStats run={detail.run} />}
+              {detail.run.status === "failed" && detail.run.error_message && (
+                <p className="rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {detail.run.error_message}
+                </p>
+              )}
+              {detail.results.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No agent outputs stored for this run.</p>
+              ) : (
+                <AnalysisResults results={detail.results} />
+              )}
+            </>
           )}
         </div>
       </DialogContent>

@@ -156,9 +156,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            <div className="flex justify-end border-t pt-4">
-              <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
-            </div>
+            <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
           </CardContent>
         </Card>
       </form>

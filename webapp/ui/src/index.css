@@ -158,3 +158,28 @@
     animation: none;
   }
 }
+
+/*
+ * Crisp gradient ring ("AI" highlight). The naive p-px wrapper trick paints
+ * a hairline ring that aliases thinner at the rounded corners; masking the
+ * gradient to the padding box yields a uniform 1px ring everywhere.
+ * Children must fill the padding box (p-px) with their own background.
+ */
+.gradient-border {
+  border-radius: 12px;
+  padding: 1px;
+  background: linear-gradient(
+    135deg,
+    rgb(139 92 246 / 0.85),
+    rgb(56 189 248 / 0.5) 45%,
+    rgb(34 211 238 / 0.85)
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+}

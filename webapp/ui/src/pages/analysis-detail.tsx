@@ -3,12 +3,12 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CircleDollarSign, ShieldAlert } from "lucide-react"
 import { api } from "@/api/client"
 import type { AnalysisDetail } from "@/api/types"
-import { AnalysisResults } from "@/components/analysis-results"
-import { RatingBadge, StatusBadge } from "@/components/rating-badge"
+import { AnalysisResults, RunStats } from "@/components/analysis-results"
+import { StatusBadge } from "@/components/rating-badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatDate, formatMoney } from "@/lib/utils"
+import { formatDate } from "@/lib/utils"
 
 interface LiveEvent {
   type: "agent" | "status" | "complete" | "error"
@@ -113,7 +113,6 @@ export default function AnalysisDetailPage() {
   if (!run) return <Skeleton className="h-64 w-full" />
 
   const liveAgents = events.filter((e) => e.type === "agent")
-  const latestComplete = [...events].reverse().find((e) => e.type === "complete")
 
   return (
     <div className="space-y-6">
@@ -134,6 +133,8 @@ export default function AnalysisDetailPage() {
         </div>
       </div>
 
+      {run.status === "completed" && <RunStats run={run} />}
+
       {run.status === "running" && (
         <Card className="border-primary/30 bg-primary/5">
           <CardContent className="flex items-center gap-3 py-4 text-sm">
@@ -144,23 +145,6 @@ export default function AnalysisDetailPage() {
             Analysis in progress — the team of agents is working. You can leave this page and come back.
           </CardContent>
         </Card>
-      )}
-
-      {(run.status === "completed" || latestComplete) && (
-        <div className="grid gap-3 sm:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Rating</CardTitle></CardHeader>
-            <CardContent><RatingBadge rating={run.rating} /></CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Entry price</CardTitle></CardHeader>
-            <CardContent className="text-xl font-semibold">{formatMoney(run.entry_price)}</CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-xs font-medium text-muted-foreground">Stop loss</CardTitle></CardHeader>
-            <CardContent className="text-xl font-semibold">{formatMoney(run.stop_loss)}</CardContent>
-          </Card>
-        </div>
       )}
 
       {run.status === "failed" && run.error_message && (
@@ -189,7 +173,7 @@ export default function AnalysisDetailPage() {
 
       {/* Persisted results (completed view) — PM's final decision pinned first */}
       {run.status !== "running" && detail && detail.results.length > 0 && (
-        <AnalysisResults results={detail.results} run={run} />
+        <AnalysisResults results={detail.results} />
       )}
     </div>
   )
