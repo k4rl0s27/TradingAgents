@@ -1,3 +1,4 @@
+import { useState } from "react"
 import { Link } from "react-router-dom"
 import { ArrowDownRight, ArrowUpRight, RefreshCw, TrendingUp, Wallet } from "lucide-react"
 import { api } from "@/api/client"
@@ -8,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Skeleton } from "@/components/ui/skeleton"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useData } from "@/lib/useData"
-import { formatMoney, formatNumber, formatPercent } from "@/lib/utils"
+import { cn, formatMoney, formatNumber, formatPercent } from "@/lib/utils"
 
 function CardStat({
   label,
@@ -87,6 +88,16 @@ function HoldingsTable({ holdings, totalValue }: { holdings: Holding[]; totalVal
 
 export default function DashboardPage() {
   const { data, loading, error, refresh } = useData(() => api.summary(), [])
+  const [refreshing, setRefreshing] = useState(false)
+
+  async function refreshPrices() {
+    setRefreshing(true)
+    try {
+      await refresh()
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   if (loading && !data) return <Skeleton className="h-40 w-full" />
   if (error) return <p className="py-8 text-center text-sm text-red-500">{error}</p>
@@ -103,9 +114,17 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-sm text-muted-foreground">Your portfolio at today's prices</p>
         </div>
-        <Button variant="outline" size="icon" onClick={refresh} aria-label="Refresh prices">
-          <RefreshCw className="size-4" />
+        <Button
+          variant="outline"
+          size="icon"
+          onClick={refreshPrices}
+          disabled={refreshing}
+          aria-label="Refresh prices"
+          title={refreshing ? "Refreshing…" : "Refresh prices"}
+        >
+          <RefreshCw className={cn("size-4", refreshing && "animate-spin")} />
         </Button>
+        {refreshing && <span className="sr-only">Refreshing…</span>}
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">

@@ -7,7 +7,6 @@ import AnalysisDetailPage from "@/pages/analysis-detail"
 import DashboardPage from "@/pages/dashboard"
 import PortfolioPage from "@/pages/portfolio"
 import SettingsPage from "@/pages/settings"
-import SimpleFINPage from "@/pages/simplefin"
 import LoginPage from "@/pages/login"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -39,7 +38,6 @@ export default function App() {
         <Route path="/portfolio" element={<PortfolioPage />} />
         <Route path="/analysis" element={<AnalysisPage />} />
         <Route path="/analysis/:id" element={<AnalysisDetailPage />} />
-        <Route path="/simplefin" element={<SimpleFINPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Route>

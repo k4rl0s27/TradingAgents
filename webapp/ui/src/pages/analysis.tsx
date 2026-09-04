@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Eye, Play } from "lucide-react"
 import { api } from "@/api/client"
 import type { AnalysisDepth, AnalysisRun } from "@/api/types"
+import { DateField } from "@/components/date-field"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -77,8 +78,8 @@ function NewAnalysisForm() {
             <Input id="a-ticker" value={ticker} onChange={(e) => setTicker(e.target.value)} placeholder="NVDA" autoCapitalize="characters" />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="a-date">Analysis date</Label>
-            <Input id="a-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+            <Label>Analysis date</Label>
+            <DateField value={date} onChange={setDate} toDate={new Date()} />
           </div>
         </div>
         <div className="space-y-1.5">

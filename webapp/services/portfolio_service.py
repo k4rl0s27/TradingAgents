@@ -6,6 +6,7 @@ Also builds the portfolio_context string injected into agent prompts.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime
 
 import yfinance as yf
@@ -316,8 +317,16 @@ async def delete_transaction(user_id: int, tx_id: int) -> bool:
 
 # ── Portfolio Context Builder ─────────────────────────────────────────────────
 
+# A Yahoo Finance batch fetch takes seconds, and every dashboard/portfolio
+# request used to trigger one. Quotes barely move intra-minute, so memoize the
+# last successful fetch per ticker set for a short window. Failures are never
+# cached (an empty result would otherwise linger).
+_PRICE_CACHE_TTL_SECONDS = 30.0
+_price_cache: dict[str, tuple[float, dict[str, dict]]] = {}
+
+
 async def get_current_prices(tickers: list[str]) -> dict[str, dict]:
-    """Fetch current market prices from Yahoo Finance.
+    """Fetch current market prices from Yahoo Finance (TTL-cached).
 
     Returns a dict mapping ticker → {price, previous_close}.
     Returns an empty dict if no data is available.
@@ -327,6 +336,11 @@ async def get_current_prices(tickers: list[str]) -> dict[str, dict]:
     unique = list(dict.fromkeys(t.upper() for t in tickers if t))
     if not unique:
         return {}
+
+    cache_key = ",".join(sorted(unique))
+    cached = _price_cache.get(cache_key)
+    if cached and time.monotonic() - cached[0] < _PRICE_CACHE_TTL_SECONDS:
+        return cached[1]
 
     prices: dict[str, dict] = {}
     try:
@@ -354,6 +368,8 @@ async def get_current_prices(tickers: list[str]) -> dict[str, dict]:
     except Exception:
         logger.warning("Yahoo Finance batch fetch failed", exc_info=True)
 
+    if prices:
+        _price_cache[cache_key] = (time.monotonic(), prices)
     return prices
 
 

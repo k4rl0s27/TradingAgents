@@ -1,6 +1,8 @@
 import { useData } from "@/lib/useData"
 import { api } from "@/api/client"
 import type { ProviderOption } from "@/api/types"
+import { NumberField } from "@/components/number-field"
+import { SimpleFINSection } from "@/components/simplefin-section"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -150,13 +152,15 @@ export default function SettingsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="s-temp">Temperature</Label>
-                <Input id="s-temp" type="number" step="0.1" min="0" max="2" value={temperature} onChange={(e) => setTemperature(e.target.value)} placeholder={String(data?.temperature ?? "")} />
+                <NumberField id="s-temp" value={temperature} onChange={setTemperature} placeholder={String(data?.temperature ?? "")} min={0} step={0.1} />
               </div>
             </div>
           </CardContent>
         </Card>
         <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</Button>
       </form>
+
+      <SimpleFINSection />
     </div>
   )
 }

@@ -1,5 +1,5 @@
 import { Link, NavLink, Outlet } from "react-router-dom"
-import { CandlestickChart, LayoutDashboard, LineChart, LogOut, Moon, PiggyBank, Settings, Sun, Wallet } from "lucide-react"
+import { CandlestickChart, LayoutDashboard, LineChart, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import { useTheme } from "@/lib/theme"
@@ -74,11 +74,6 @@ function UserMenu() {
           <div className="text-xs font-normal text-muted-foreground">{user?.email}</div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem asChild>
-          <Link to="/simplefin">
-            <PiggyBank className="size-4" /> SimpleFIN
-          </Link>
-        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <Link to="/settings">
             <Settings className="size-4" /> Settings

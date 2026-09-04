@@ -26,6 +26,8 @@ import {
 } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { DateField } from "@/components/date-field"
+import { NumberField } from "@/components/number-field"
 import { useData } from "@/lib/useData"
 import { formatDate, formatMoney, formatNumber } from "@/lib/utils"
 
@@ -102,11 +104,11 @@ function AddHoldingDialog({ onSaved }: { onSaved: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="h-qty">Quantity</Label>
-              <Input id="h-qty" type="number" inputMode="decimal" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10" />
+              <NumberField id="h-qty" value={quantity} onChange={setQuantity} placeholder="10" min={0} step={1} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="h-cost">Avg cost</Label>
-              <Input id="h-cost" type="number" inputMode="decimal" min="0" step="any" value={avgCost} onChange={(e) => setAvgCost(e.target.value)} placeholder="150.00" />
+              <NumberField id="h-cost" value={avgCost} onChange={setAvgCost} placeholder="150.00" min={0} step={1} />
             </div>
           </div>
         </div>
@@ -118,12 +120,7 @@ function AddHoldingDialog({ onSaved }: { onSaved: () => void }) {
   )
 }
 
-function HoldingsTab() {
-  const { data, loading, error, refresh } = useData(() => api.summary(), [])
-  if (loading && !data) return <Skeleton className="h-40 w-full" />
-  if (error) return <ErrorNote error={error} />
-  if (!data) return null
-
+function HoldingsTab({ summary, refresh }: { summary: Awaited<ReturnType<typeof api.summary>>; refresh: () => void }) {
   async function remove(h: Holding) {
     try {
       await api.deleteHolding(h.id)
@@ -134,58 +131,60 @@ function HoldingsTab() {
     }
   }
 
-  const rows = data.holdings
+  const rows = summary.holdings
+  if (rows.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="flex justify-end"><AddHoldingDialog onSaved={refresh} /></div>
+        <p className="py-10 text-center text-sm text-muted-foreground">No holdings. Add your first position above.</p>
+      </div>
+    )
+  }
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <AddHoldingDialog onSaved={refresh} />
+      <div className="flex justify-end"><AddHoldingDialog onSaved={refresh} /></div>
+      <div className="overflow-x-auto rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead className="text-right">Qty</TableHead>
+              <TableHead className="text-right">Avg cost</TableHead>
+              <TableHead className="text-right">Last</TableHead>
+              <TableHead className="text-right">Day</TableHead>
+              <TableHead className="text-right">Value</TableHead>
+              <TableHead className="w-10 text-right" aria-label="Actions" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.map((h) => {
+              const up = (h.day_change ?? 0) >= 0
+              return (
+                <TableRow key={h.id}>
+                  <TableCell>
+                    <span className="font-medium">{h.ticker}</span>
+                    {h.source === "simplefin" && (
+                      <Badge variant="outline" className="ml-2 text-[10px]">sync</Badge>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right">{formatNumber(h.quantity, 4)}</TableCell>
+                  <TableCell className="text-right text-muted-foreground">{formatMoney(h.avg_cost)}</TableCell>
+                  <TableCell className="text-right">{formatMoney(h.current_price)}</TableCell>
+                  <TableCell className={`text-right ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
+                    {formatMoney(h.day_change)}
+                  </TableCell>
+                  <TableCell className="text-right font-medium">{formatMoney(h.market_value)}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon-sm" aria-label={`Remove ${h.ticker}`} onClick={() => remove(h)}>
+                      <Trash2 className="size-4 text-muted-foreground hover:text-destructive" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              )
+            })}
+          </TableBody>
+        </Table>
       </div>
-      {rows.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">No holdings. Add your first position above.</p>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead className="text-right">Qty</TableHead>
-                <TableHead className="text-right">Avg cost</TableHead>
-                <TableHead className="text-right">Last</TableHead>
-                <TableHead className="text-right">Day</TableHead>
-                <TableHead className="text-right">Value</TableHead>
-                <TableHead className="text-right w-10" aria-label="Actions" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((h) => {
-                const up = (h.day_change ?? 0) >= 0
-                return (
-                  <TableRow key={h.id}>
-                    <TableCell>
-                      <span className="font-medium">{h.ticker}</span>
-                      {h.source === "simplefin" && (
-                        <Badge variant="outline" className="ml-2 text-[10px]">sync</Badge>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">{formatNumber(h.quantity, 4)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">{formatMoney(h.avg_cost)}</TableCell>
-                    <TableCell className="text-right">{formatMoney(h.current_price)}</TableCell>
-                    <TableCell className={`text-right ${up ? "text-emerald-600 dark:text-emerald-400" : "text-red-600 dark:text-red-400"}`}>
-                      {formatMoney(h.day_change)}
-                    </TableCell>
-                    <TableCell className="text-right font-medium">{formatMoney(h.market_value)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button variant="ghost" size="icon-sm" aria-label={`Remove ${h.ticker}`} onClick={() => remove(h)}>
-                        <Trash2 className="size-4 text-muted-foreground hover:text-destructive" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
     </div>
   )
 }
@@ -263,21 +262,21 @@ function AddTransactionDialog({ onSaved }: { onSaved: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="t-qty">Quantity</Label>
-              <Input id="t-qty" type="number" inputMode="decimal" min="0" step="any" value={quantity} onChange={(e) => setQuantity(e.target.value)} placeholder="10" />
+              <NumberField id="t-qty" value={quantity} onChange={setQuantity} placeholder="10" min={0} step={1} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="t-price">Price</Label>
-              <Input id="t-price" type="number" inputMode="decimal" min="0" step="any" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="150.00" />
+              <NumberField id="t-price" value={price} onChange={setPrice} placeholder="150.00" min={0} step={1} />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="t-date">Date</Label>
-              <Input id="t-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              <Label>Date</Label>
+              <DateField value={date} onChange={setDate} toDate={new Date()} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="t-fees">Fees</Label>
-              <Input id="t-fees" type="number" inputMode="decimal" min="0" step="any" value={fees} onChange={(e) => setFees(e.target.value)} placeholder="0.00" />
+              <NumberField id="t-fees" value={fees} onChange={setFees} placeholder="0.00" min={0} step={1} />
             </div>
           </div>
         </div>
@@ -289,12 +288,7 @@ function AddTransactionDialog({ onSaved }: { onSaved: () => void }) {
   )
 }
 
-function TransactionsTab() {
-  const { data, loading, error, refresh } = useData(() => api.transactions(), [])
-  if (loading && !data) return <Skeleton className="h-40 w-full" />
-  if (error) return <ErrorNote error={error} />
-  if (!data) return null
-
+function TransactionsTab({ data, refresh }: { data: Transaction[]; refresh: () => void }) {
   async function remove(tx: Transaction) {
     try {
       await api.deleteTransaction(tx.id)
@@ -307,9 +301,7 @@ function TransactionsTab() {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
-        <AddTransactionDialog onSaved={refresh} />
-      </div>
+      <div className="flex justify-end"><AddTransactionDialog onSaved={refresh} /></div>
       {data.length === 0 ? (
         <p className="py-10 text-center text-sm text-muted-foreground">No transactions recorded.</p>
       ) : (
@@ -322,7 +314,7 @@ function TransactionsTab() {
                 <TableHead className="text-right">Qty</TableHead>
                 <TableHead className="text-right">Price</TableHead>
                 <TableHead className="text-right">Total</TableHead>
-                <TableHead className="text-right w-10" aria-label="Actions" />
+                <TableHead className="w-10 text-right" aria-label="Actions" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -354,13 +346,12 @@ function TransactionsTab() {
 
 // ── Cash ──────────────────────────────────────────────────────────────────────
 
-function CashTab() {
-  const { data, loading, refresh } = useData(() => api.cashHistory(), [])
+function CashTab({ data, refresh }: { data: CashBalance[]; refresh: () => void }) {
   const [open, setOpen] = useState(false)
   const [amount, setAmount] = useState("")
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
   const [saving, setSaving] = useState(false)
-  const current = data && data.length > 0 ? data[0] : null
+  const current = data.length > 0 ? data[0] : null
 
   async function submit() {
     if (!amount) {
@@ -390,8 +381,6 @@ function CashTab() {
     }
   }
 
-  if (loading && !data) return <Skeleton className="h-40 w-full" />
-
   return (
     <div className="space-y-4">
       <Card>
@@ -399,7 +388,7 @@ function CashTab() {
           <CardTitle className="text-2xl">{formatMoney(current?.amount)}</CardTitle>
           <CardDescription>Current cash balance {current ? `as of ${formatDate(current.date)}` : "— not set yet"}</CardDescription>
         </CardHeader>
-        <CardContent className="flex gap-2">
+        <CardContent>
           <Dialog open={open} onOpenChange={setOpen}>
             <Button asChild size="sm">
               <span onClick={() => setOpen(true)}>Update cash</span>
@@ -411,11 +400,11 @@ function CashTab() {
               <div className="grid gap-3 py-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="c-amount">Amount</Label>
-                  <Input id="c-amount" type="number" inputMode="decimal" min="0" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="10000.00" />
+                  <NumberField id="c-amount" value={amount} onChange={setAmount} placeholder="10000.00" min={0} step={100} />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="c-date">Date</Label>
-                  <Input id="c-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+                  <Label>Date</Label>
+                  <DateField value={date} onChange={setDate} toDate={new Date()} />
                 </div>
               </div>
               <DialogFooter>
@@ -426,7 +415,7 @@ function CashTab() {
         </CardContent>
       </Card>
 
-      {data && data.length > 0 && (
+      {data.length > 0 && (
         <div className="space-y-1">
           {data.map((c) => (
             <div key={c.id} className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm">
@@ -445,9 +434,19 @@ function CashTab() {
   )
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Page (loads everything once; tab switches are instant) ───────────────────
 
 export default function PortfolioPage() {
+  const summary = useData(() => api.summary(), [])
+  const transactions = useData(() => api.transactions(), [])
+  const cash = useData(() => api.cashHistory(), [])
+
+  const refreshAll = () => {
+    summary.refresh()
+    transactions.refresh()
+    cash.refresh()
+  }
+
   return (
     <div className="space-y-6">
       <div>
@@ -460,11 +459,34 @@ export default function PortfolioPage() {
           <TabsTrigger value="transactions">Transactions</TabsTrigger>
           <TabsTrigger value="cash">Cash</TabsTrigger>
         </TabsList>
-        <TabsContent value="holdings" className="mt-4"><HoldingsTab /></TabsContent>
-        <TabsContent value="transactions" className="mt-4"><TransactionsTab /></TabsContent>
-        <TabsContent value="cash" className="mt-4"><CashTab /></TabsContent>
+        <TabsContent value="holdings" className="mt-4">
+          {!summary.data && summary.loading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : summary.error ? (
+            <ErrorNote error={summary.error} />
+          ) : summary.data ? (
+            <HoldingsTab summary={summary.data} refresh={refreshAll} />
+          ) : null}
+        </TabsContent>
+        <TabsContent value="transactions" className="mt-4">
+          {!transactions.data && transactions.loading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : transactions.error ? (
+            <ErrorNote error={transactions.error} />
+          ) : transactions.data ? (
+            <TransactionsTab data={transactions.data} refresh={refreshAll} />
+          ) : null}
+        </TabsContent>
+        <TabsContent value="cash" className="mt-4">
+          {!cash.data && cash.loading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : cash.error ? (
+            <ErrorNote error={cash.error} />
+          ) : cash.data ? (
+            <CashTab data={cash.data} refresh={refreshAll} />
+          ) : null}
+        </TabsContent>
       </Tabs>
     </div>
   )
 }
-

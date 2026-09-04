@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { toast } from "sonner"
-import { Link } from "react-router-dom"
 import { PiggyBank, RefreshCw, Unplug } from "lucide-react"
 import { api } from "@/api/client"
 import { Button } from "@/components/ui/button"
@@ -12,9 +11,15 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useData } from "@/lib/useData"
 import { formatMoney } from "@/lib/utils"
 
+interface Account {
+  account_id: string
+  name: string
+  org_name: string
+}
+
 function ConnectFlow({ onDone }: { onDone: () => void }) {
   const [token, setToken] = useState("")
-  const [accounts, setAccounts] = useState<{ account_id: string; name: string; org_name: string }[] | null>(null)
+  const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [busy, setBusy] = useState(false)
 
   async function connect() {
@@ -34,7 +39,7 @@ function ConnectFlow({ onDone }: { onDone: () => void }) {
     }
   }
 
-  async function link(acc: { account_id: string; name: string; org_name: string }) {
+  async function link(acc: Account) {
     setBusy(true)
     try {
       await api.simplefinLink({ account_id: acc.account_id, account_name: acc.name, org_name: acc.org_name })
@@ -48,46 +53,35 @@ function ConnectFlow({ onDone }: { onDone: () => void }) {
     }
   }
 
+  if (accounts === null) {
+    return (
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="sf-token">SimpleFIN token</Label>
+          <Input id="sf-token" value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste token…" className="font-mono" />
+        </div>
+        <Button onClick={connect} disabled={busy}>{busy ? "Connecting…" : "Connect"}</Button>
+      </div>
+    )
+  }
+  if (accounts.length === 0) {
+    return <p className="text-sm text-muted-foreground">No accounts found on this token. Make sure it has connected institutions.</p>
+  }
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base"><PiggyBank className="size-4" /> Connect SimpleFIN</CardTitle>
-        <CardDescription>
-          Your brokerage likely offers a free SimpleFIN token. Get yours at{" "}
-          <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noreferrer" className="underline underline-offset-2">
-            SimpleFIN Bridge
-          </a>{" "}
-          and paste it here. Holdings, transactions and cash sync automatically.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {accounts === null ? (
-          <div className="space-y-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="sf-token">SimpleFIN token</Label>
-              <Input id="sf-token" value={token} onChange={(e) => setToken(e.target.value)} placeholder="paste token…" className="font-mono" />
-            </div>
-            <Button onClick={connect} disabled={busy}>{busy ? "Connecting…" : "Connect"}</Button>
-          </div>
-        ) : accounts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No accounts found on this token. Make sure it has connected institutions.</p>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Choose the account to monitor:</p>
-            {accounts.map((acc) => (
-              <Button key={acc.account_id} variant="outline" className="w-full justify-start" disabled={busy} onClick={() => link(acc)}>
-                <span className="truncate">{acc.name || acc.account_id}</span>
-                {acc.org_name && <span className="ml-auto text-xs text-muted-foreground">{acc.org_name}</span>}
-              </Button>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
+    <div className="space-y-2">
+      <p className="text-sm text-muted-foreground">Choose the account to monitor:</p>
+      {accounts.map((acc) => (
+        <Button key={acc.account_id} variant="outline" className="w-full justify-start" disabled={busy} onClick={() => link(acc)}>
+          <span className="truncate">{acc.name || acc.account_id}</span>
+          {acc.org_name && <span className="ml-auto text-xs text-muted-foreground">{acc.org_name}</span>}
+        </Button>
+      ))}
+    </div>
   )
 }
 
-export default function SimpleFINPage() {
+/** SimpleFIN connection + sync management, embedded in the Settings view. */
+export function SimpleFINSection() {
   const { data, loading, error, refresh } = useData(() => api.simplefinStatus(), [])
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -107,29 +101,32 @@ export default function SimpleFINPage() {
     }
   }
 
-  if (loading && !data) return <Skeleton className="h-40 w-full" />
-  if (error) return <p className="py-8 text-center text-sm text-red-500">{error}</p>
+  if (loading && !data) return <Skeleton className="h-32 w-full" />
+  if (error) return <p className="text-sm text-red-500">{error}</p>
   if (!data) return null
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SimpleFIN</h1>
-        <p className="text-sm text-muted-foreground">Automatic portfolio sync from your brokerage</p>
-      </div>
-
-      {!data.connected ? (
-        <ConnectFlow onDone={refresh} />
-      ) : (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Connected</CardTitle>
-            <CardDescription>
-              Account <span className="font-medium text-foreground">{data.linked_account?.account_name}</span>
-              {data.linked_account?.org_name ? ` (${data.linked_account.org_name})` : ""}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <PiggyBank className="size-4" /> SimpleFIN
+        </CardTitle>
+        <CardDescription>
+          {data.connected
+            ? `Account ${data.linked_account?.account_name ?? ""}${data.linked_account?.org_name ? ` (${data.linked_account.org_name})` : ""}`
+            : "Automatic portfolio sync from your brokerage. Your brokerage likely offers a free token at "}
+          {!data.connected && (
+            <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+              SimpleFIN Bridge
+            </a>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {!data.connected ? (
+          <ConnectFlow onDone={refresh} />
+        ) : (
+          <div className="flex flex-wrap gap-2">
             <Button onClick={sync} disabled={syncing}>
               <RefreshCw className="size-4" /> {syncing ? "Syncing…" : "Sync now"}
             </Button>
@@ -163,14 +160,9 @@ export default function SimpleFINPage() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-          </CardContent>
-        </Card>
-      )}
-
-      <p className="text-xs text-muted-foreground">
-        Synced positions are managed by SimpleFIN — edit them at your brokerage, then{" "}
-        <Link to="/portfolio" className="underline underline-offset-2">refresh the portfolio</Link>.
-      </p>
-    </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
   )
 }
