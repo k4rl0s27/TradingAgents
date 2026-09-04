@@ -15,7 +15,6 @@ from webapp.services.graph_runner import (
     _extract_stop_loss,
 )
 
-
 pytestmark = pytest.mark.unit
 
 

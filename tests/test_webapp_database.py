@@ -8,7 +8,6 @@ import pytest
 
 import webapp.database as db
 
-
 pytestmark = pytest.mark.unit
 
 

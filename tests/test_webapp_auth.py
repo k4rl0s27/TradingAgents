@@ -6,14 +6,11 @@ against a throwaway SQLite file.
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 from fastapi.testclient import TestClient
 
 import webapp.auth as auth_module
 import webapp.database as db
-
 
 pytestmark = pytest.mark.unit
 

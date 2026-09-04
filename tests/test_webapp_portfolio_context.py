@@ -9,7 +9,6 @@ import pytest
 import webapp.database as db
 import webapp.services.portfolio_service as svc
 
-
 pytestmark = pytest.mark.unit
 
 # aiosqlite runs one worker thread per connection bound to the calling event
