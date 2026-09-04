@@ -85,9 +85,14 @@ export function SimpleFINSection() {
   const { data, loading, error, refresh } = useData(() => api.simplefinStatus(), [])
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  // Keep the spinner spinning for at least this long — a fast sync otherwise
+  // flashes the icon and reads as nothing happening.
+  const MIN_SYNC_SPIN_MS = 900
 
   async function sync() {
+    if (syncing) return
     setSyncing(true)
+    const started = performance.now()
     try {
       const res = await api.simplefinSync()
       toast.success(
@@ -97,6 +102,8 @@ export function SimpleFINSection() {
     } catch (err) {
       toast.error((err as Error).message)
     } finally {
+      const rest = MIN_SYNC_SPIN_MS - (performance.now() - started)
+      if (rest > 0) await new Promise((r) => setTimeout(r, rest))
       setSyncing(false)
     }
   }

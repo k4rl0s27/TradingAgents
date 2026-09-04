@@ -155,9 +155,12 @@ export default function SettingsPage() {
                 <NumberField id="s-temp" value={temperature} onChange={setTemperature} placeholder={String(data?.temperature ?? "")} min={0} step={0.1} />
               </div>
             </div>
+
+            <div className="flex justify-end border-t pt-4">
+              <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+            </div>
           </CardContent>
         </Card>
-        <Button type="submit" disabled={saving}>{saving ? "Saving…" : "Save settings"}</Button>
       </form>
 
       <SimpleFINSection />

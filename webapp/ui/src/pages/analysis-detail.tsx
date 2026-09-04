@@ -3,12 +3,12 @@ import { Link, useParams } from "react-router-dom"
 import { ArrowLeft, CircleDollarSign, ShieldAlert } from "lucide-react"
 import { api } from "@/api/client"
 import type { AnalysisDetail } from "@/api/types"
-import { Badge } from "@/components/ui/badge"
+import { AnalysisResults } from "@/components/analysis-results"
+import { RatingBadge, StatusBadge } from "@/components/rating-badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { RatingBadge, StatusBadge } from "./analysis"
-import { formatDate, formatMoney, prettifyAgentName } from "@/lib/utils"
+import { formatDate, formatMoney } from "@/lib/utils"
 
 interface LiveEvent {
   type: "agent" | "status" | "complete" | "error"
@@ -187,22 +187,9 @@ export default function AnalysisDetailPage() {
           </Card>
         ))}
 
-      {/* Persisted results (completed view) */}
+      {/* Persisted results (completed view) — PM's final decision pinned first */}
       {run.status !== "running" && detail && detail.results.length > 0 && (
-        <div className="space-y-4">
-          {detail.results.map((r) => (
-            <Card key={r.id}>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  {prettifyAgentName(r.agent_name)} <Badge variant="outline" className="text-[10px]">{r.output_type}</Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre className="max-h-96 overflow-y-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed">{r.content}</pre>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+        <AnalysisResults results={detail.results} run={run} />
       )}
     </div>
   )

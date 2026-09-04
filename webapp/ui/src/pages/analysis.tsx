@@ -1,13 +1,20 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
-import { Eye, Play } from "lucide-react"
+import { Eye, Play, Sparkles } from "lucide-react"
 import { api } from "@/api/client"
-import type { AnalysisDepth, AnalysisRun } from "@/api/types"
+import type { AnalysisDepth, AnalysisDetail, AnalysisRun } from "@/api/types"
+import { AnalysisResults } from "@/components/analysis-results"
 import { DateField } from "@/components/date-field"
-import { Badge } from "@/components/ui/badge"
+import { RatingBadge, StatusBadge } from "@/components/rating-badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -16,26 +23,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useData } from "@/lib/useData"
 import { formatDate } from "@/lib/utils"
-
-export function RatingBadge({ rating }: { rating: string | null }) {
-  if (!rating) return <Badge variant="outline">—</Badge>
-  const map: Record<string, string> = {
-    Buy: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300",
-    Overweight: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300",
-    Hold: "bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-300",
-    Underweight: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-300",
-    Sell: "bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-300",
-    REVIEW: "bg-muted text-muted-foreground",
-  }
-  const cls = map[rating] ?? "bg-muted text-muted-foreground"
-  return <Badge variant="outline" className={cls}>{rating}</Badge>
-}
-
-export function StatusBadge({ status }: { status: string }) {
-  if (status === "completed") return <Badge className="bg-emerald-600 text-white">Completed</Badge>
-  if (status === "running") return <Badge variant="secondary" className="animate-pulse">Running…</Badge>
-  return <Badge variant="destructive">Failed</Badge>
-}
 
 function NewAnalysisForm() {
   const navigate = useNavigate()
@@ -106,8 +93,66 @@ function NewAnalysisForm() {
   )
 }
 
+/** Past-analysis detail as a dialog: the PM's final decision leads, glowing. */
+function AnalysisDetailDialog({ run, onClose }: { run: AnalysisRun; onClose: () => void }) {
+  const [detail, setDetail] = useState<AnalysisDetail | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setDetail(null)
+    setError(null)
+    api
+      .analysisDetail(run.id)
+      .then((d) => {
+        if (!cancelled) setDetail(d)
+      })
+      .catch((err) => {
+        if (!cancelled) setError((err as Error).message)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [run.id])
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="flex max-h-[88dvh] w-full max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:rounded-xl">
+        <DialogHeader className="border-b px-5 py-4 sm:px-6">
+          <div className="flex items-center gap-2">
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="size-4 text-violet-500" aria-hidden />
+              {run.ticker}
+              <span className="font-normal text-muted-foreground">
+                · {formatDate(run.analysis_date)} · {run.analysis_depth}
+              </span>
+            </DialogTitle>
+            <div className="ml-auto flex items-center gap-2">
+              <StatusBadge status={run.status} />
+              <RatingBadge rating={run.rating} />
+            </div>
+          </div>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-6">
+          {error ? (
+            <p className="py-8 text-center text-sm text-red-500">{error}</p>
+          ) : !detail ? (
+            <Skeleton className="h-64 w-full" />
+          ) : detail.results.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No agent outputs stored for this run.</p>
+          ) : (
+            <AnalysisResults results={detail.results} run={run} />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function HistoryTab() {
   const { data, loading, error } = useData(() => api.analysisHistory({ page: 1, per_page: 30 }), [])
+  const [selected, setSelected] = useState<AnalysisRun | null>(null)
+
   if (loading && !data) return <Skeleton className="h-40 w-full" />
   if (error) return <p className="py-8 text-center text-sm text-red-500">{error}</p>
   if (!data) return null
@@ -116,38 +161,58 @@ function HistoryTab() {
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Symbol</TableHead>
-            <TableHead className="hidden sm:table-cell">Date</TableHead>
-            <TableHead className="hidden md:table-cell">Depth</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="text-right">Rating</TableHead>
-            <TableHead className="w-10 text-right" aria-label="Open" />
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.items.map((run: AnalysisRun) => (
-            <TableRow key={run.id}>
-              <TableCell className="font-medium">{run.ticker}</TableCell>
-              <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{formatDate(run.analysis_date)}</TableCell>
-              <TableCell className="hidden capitalize text-muted-foreground md:table-cell">{run.analysis_depth}</TableCell>
-              <TableCell><StatusBadge status={run.status} /></TableCell>
-              <TableCell className="text-right"><RatingBadge rating={run.rating} /></TableCell>
-              <TableCell className="text-right">
-                <a href={`/analysis/${run.id}`}>
-                  <Button variant="ghost" size="icon-sm" aria-label={`Open analysis ${run.id}`}>
+    <>
+      <div className="overflow-x-auto rounded-lg border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Symbol</TableHead>
+              <TableHead className="hidden sm:table-cell">Date</TableHead>
+              <TableHead className="hidden md:table-cell">Depth</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="text-right">Rating</TableHead>
+              <TableHead className="w-10 text-right" aria-label="Open" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.items.map((run: AnalysisRun) => (
+              <TableRow
+                key={run.id}
+                className="cursor-pointer"
+                onClick={() => setSelected(run)}
+              >
+                <TableCell className="font-medium">{run.ticker}</TableCell>
+                <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">{formatDate(run.analysis_date)}</TableCell>
+                <TableCell className="hidden capitalize text-muted-foreground md:table-cell">{run.analysis_depth}</TableCell>
+                <TableCell><StatusBadge status={run.status} /></TableCell>
+                <TableCell className="text-right"><RatingBadge rating={run.rating} /></TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Open analysis ${run.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setSelected(run)
+                    }}
+                  >
                     <Eye className="size-4" />
                   </Button>
-                </a>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+
+      {data.items.length > 0 && data.total > data.items.length && (
+        <p className="text-center text-xs text-muted-foreground">
+          Showing {data.items.length} of {data.total} — pagination lands with the next batch of runs.
+        </p>
+      )}
+
+      {selected && <AnalysisDetailDialog run={selected} onClose={() => setSelected(null)} />}
+    </>
   )
 }
 

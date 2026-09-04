@@ -1,4 +1,4 @@
-import { Link, NavLink, Outlet } from "react-router-dom"
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom"
 import { CandlestickChart, LayoutDashboard, LineChart, LogOut, Moon, Settings, Sun, Wallet } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
@@ -101,6 +101,7 @@ function Brand() {
 
 export function AppShell() {
   const today = new Date().toISOString().slice(0, 10)
+  const { pathname } = useLocation()
 
   return (
     <div className="min-h-dvh bg-background pb-16 md:pb-0 md:pl-60">
@@ -126,7 +127,9 @@ export function AppShell() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 pt-16 md:px-8 md:pt-8">
-        <Outlet context={{ today }} />
+        <div key={pathname} className="animate-view">
+          <Outlet context={{ today }} />
+        </div>
       </main>
 
       {/* Mobile bottom navigation */}
