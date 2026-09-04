@@ -8,7 +8,7 @@ services:
       - .env
     volumes:
       - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/webapp/data
+      - webapp_data:/home/appuser/app/data
 
   # CLI mode — interactive terminal
   tradingagents:
@@ -18,7 +18,7 @@ services:
       - .env
     volumes:
       - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/webapp/data
+      - webapp_data:/home/appuser/app/data
     tty: true
     stdin_open: true
     profiles:
@@ -43,7 +43,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434/v1
     volumes:
       - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/webapp/data
+      - webapp_data:/home/appuser/app/data
     depends_on:
       - ollama
     tty: true
