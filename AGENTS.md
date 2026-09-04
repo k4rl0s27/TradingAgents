@@ -6,7 +6,7 @@ Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearc
 
 - `tradingagents/` — core library (LangGraph multi-agent pipeline, LLM clients, dataflows). Tracks upstream closely; the fork's only changes are the `fork(core):`-marked hunks in `UPSTREAM.md`.
 - `cli/` — upstream Typer CLI (`tradingagents` console script → `cli.main:app`).
-- `webapp/` — the fork's addition. `routers/` = FastAPI routes, `services/` = DB/graph bridging, `database.py` = aiosqlite schema + versioned migrations, `static/` = plain JS/CSS SPA (no build step, edit files directly).
+- `webapp/` — the fork's addition. `routers/` = FastAPI routes, `services/` = DB/graph bridging, `database.py` = aiosqlite schema + versioned migrations, `ui/` = the **React + shadcn/ui SPA** (Vite, TypeScript, Tailwind v4) which builds into `webapp/static`, `static/` = committed build output the backend serves at the root (SPA fallback for client routes).
 - `tests/` — core unit/integration + the newer `test_webapp_*` unit tests (DB migrations, dev autologin, decision extraction, portfolio context). CI runs `pytest -q`; it does not start the webapp server.
 - `ui-reference/` — design mockups, not loaded at runtime.
 
@@ -14,6 +14,10 @@ Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearc
 
 - Install dev deps: `pip install -e ".[dev]"` (Python >=3.10). `pip install -r requirements.txt` is the alternative.
 - Run webapp: `python -m uvicorn webapp.main:app --reload` **from the repo root** (also `docker compose up webapp`). Docker default entrypoint is the webapp on :8000.
+- UI dev server: from `webapp/ui`: `npm install`, then `npm run dev` (Vite on :5173, proxies `/api` + `/auth` to :8000 — keep the uvicorn backend running). **OIDC in dev**: `OIDC_REDIRECT_URI` must point at `http://localhost:5173/auth/callback`; simplest local dev is `WEBAPP_DEV_AUTOLOGIN=1` with OIDC unset.
+- UI production build: from `webapp/ui`: `npm run build` → wipes and rewrites `webapp/static` (**commit the result** — pip/Docker serve it without Node). UI lint: `npm run lint` (oxlint; warnings tolerated, keep zero errors).
+- Adding shadcn components: `npx shadcn@latest add <name>` — the CLI writes to a literal `@/` folder at `webapp/ui` root (it does not resolve the tsconfig alias); move files into `src/components/ui/`.
+- PWA icons are generated (no image toolchain): `python scripts/gen_pwa_icons.py` from the repo root — only needed when changing `webapp/ui/public` branding.
 - CLI: `tradingagents` or `python -m cli.main`.
 - Tests: `pytest` (CI runs the whole suite; all markers — including `integration`/`smoke` — run by default). Focused: `pytest -m unit`.
 - Lint (the CI gate): `ruff check .` — keep the whole repo clean under the strict select (E501 ignored, line-length 100). Do **not** run `ruff format` repo-wide; formatter adoption is deliberately deferred per the pyproject comment.

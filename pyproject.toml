@@ -59,9 +59,9 @@ include = ["tradingagents*", "cli*", "webapp*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
-# The SPA has no build step: ship it so a non-editable `pip install .` gets a
-# working webapp, not just the API (static/ is resolved from the package dir).
-webapp = ["static/*", "static/css/*", "static/js/*"]
+# The SPA is built by webapp/ui (Vite) into webapp/static — ship it so a
+# non-editable `pip install .` gets a working webapp, not just the API.
+webapp = ["static/*", "static/assets/*", "static/icons/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
