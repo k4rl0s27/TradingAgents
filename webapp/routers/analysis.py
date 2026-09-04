@@ -2,10 +2,10 @@
 Analysis API routes — run analyses, view history, stream results.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from ..models import AnalysisRunRequest, AnalysisRunResponse, StatusResponse
+from ..models import AnalysisRunRequest, AnalysisRunResponse
 from ..routers.auth import get_current_user
 from ..services import analysis_service as svc
 
@@ -24,7 +24,7 @@ async def run_analysis(body: AnalysisRunRequest, user: dict = Depends(get_curren
             analysis_depth=body.analysis_depth,
         )
     except NotImplementedError as e:
-        raise HTTPException(status_code=501, detail=str(e))
+        raise HTTPException(status_code=501, detail=str(e)) from None
 
     status = await svc.get_analysis_status(run_id)
     return status

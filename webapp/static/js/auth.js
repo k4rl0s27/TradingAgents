@@ -46,9 +46,11 @@ export async function initAuth() {
             window.location.href = '/auth/login';
             return false;
         }
-        // OIDC not configured — show the app without auth
-        console.warn('Auth check failed (OIDC may not be configured):', err.message);
-        return true;
+    // Auth check failed and the server did not report 401/Not authenticated
+    // (e.g. network error). If WEBAPP_DEV_AUTOLOGIN=1 with no OIDC configured,
+    // the server auto-provisions a dev user and /auth/me succeeds instead.
+    console.warn('Auth check failed:', err.message);
+    return true;
     }
 }
 

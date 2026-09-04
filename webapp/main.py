@@ -8,12 +8,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
 from .database import init_db
-from .routers import portfolio, analysis, auth, settings, simplefin
+from .routers import analysis, auth, portfolio, settings, simplefin
 
 logger = logging.getLogger(__name__)
 

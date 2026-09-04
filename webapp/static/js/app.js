@@ -151,7 +151,8 @@ document.addEventListener('keydown', (e) => {
 async function init() {
     initDarkMode();
 
-    // Initialize all forms (they work even if auth isn't configured)
+    // Initialize all forms (they just wire up DOM handlers; auth gating
+    // happens server-side on every /api call)
     initAnalysisForm();
     initHistoryTab();
     initCashForm();
@@ -159,8 +160,10 @@ async function init() {
     initTxForm();
     initSimpleFIN();
 
-    // Check auth — if OIDC is configured, this will redirect to login.
-    // If OIDC is not configured, the app runs without auth.
+    // Auth: with OIDC configured this redirects to login. For local
+    // development without an IdP, set WEBAPP_DEV_AUTOLOGIN=1 — the server then
+    // provisions a dev user and this succeeds (still real API routes behind
+    // it, just no login step).
     const authenticated = await initAuth();
 
     // Restore view from hash or default to dashboard

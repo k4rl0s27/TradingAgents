@@ -1,17 +1,41 @@
 """
 SQLite database setup and migration logic for the TradingAgents webapp.
 Uses aiosqlite for async database access.
+
+Migrations are numbered by the schema version they bring the DB to
+(``_MIGRATIONS[3]`` brings a DB to version 3). ``init_db`` applies only the
+migrations newer than the recorded ``schema_version``, so each runs exactly
+once per database, and errors surface instead of being swallowed.
 """
 
-import aiosqlite
-import os
 from pathlib import Path
+
+import aiosqlite
 
 DB_DIR = Path(__file__).resolve().parent.parent / "data"
 DB_PATH = DB_DIR / "trading.db"
 
-# Schema version tracking table
+# Current schema version. Bump it when adding an entry to ``_MIGRATIONS``.
 SCHEMA_VERSION = 3
+
+# Ordered by target version: {version: [(table, column, full ADD COLUMN ddl)]}.
+# Column additions are guarded by a PRAGMA existence check, which makes them
+# no-ops on fresh databases (``_SCHEMA_SQL`` already creates the current shape)
+# and on databases that predate version tracking but were already upgraded by
+# the old boot-loop.
+_MIGRATIONS: dict[int, list[tuple[str, str, str]]] = {
+    # v1: analysis depth (quick/medium/deep) on runs
+    1: [("analysis_runs", "analysis_depth", "analysis_depth TEXT NOT NULL DEFAULT 'medium'")],
+    # v2: SimpleFIN source tracking on holdings and transactions
+    2: [
+        ("holdings", "source", "source TEXT NOT NULL DEFAULT 'manual'"),
+        ("holdings", "simplefin_holding_id", "simplefin_holding_id TEXT"),
+        ("transactions", "source", "source TEXT NOT NULL DEFAULT 'manual'"),
+        ("transactions", "simplefin_transaction_id", "simplefin_transaction_id TEXT"),
+    ],
+    # v3: schema_version tracking introduced; no DDL
+    3: [],
+}
 
 
 async def get_db() -> aiosqlite.Connection:
@@ -24,36 +48,49 @@ async def get_db() -> aiosqlite.Connection:
     return db
 
 
+async def _column_exists(db: aiosqlite.Connection, table: str, column: str) -> bool:
+    """Whether ``table`` already has ``column`` (via the table-info pragma)."""
+    cursor = await db.execute(
+        "SELECT 1 FROM pragma_table_info(?) WHERE name = ?", (table, column)
+    )
+    return await cursor.fetchone() is not None
+
+
+async def _apply_migrations(db: aiosqlite.Connection) -> None:
+    """Apply pending migrations and record the resulting schema version."""
+    cursor = await db.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+    row = await cursor.fetchone()
+    current = row[0]
+    for version, steps in sorted(_MIGRATIONS.items()):
+        if version <= current:
+            continue
+        for table, column, ddl in steps:
+            if not await _column_exists(db, table, column):
+                await db.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+        await db.execute(
+            "INSERT OR REPLACE INTO schema_version (version) VALUES (?)", (version,)
+        )
+        current = version
+
+
 async def init_db() -> None:
-    """Initialize database schema. Safe to call multiple times (idempotent)."""
+    """Initialize the database schema and reconcile runtime state.
+
+    Safe to call multiple times (idempotent): migrations run only when the
+    recorded ``schema_version`` is behind ``SCHEMA_VERSION``.
+    """
     db = await get_db()
     try:
         await db.executescript(_SCHEMA_SQL)
-        # Migrations for existing databases (v1 → v2)
-        try:
-            await db.execute("ALTER TABLE analysis_runs ADD COLUMN analysis_depth TEXT NOT NULL DEFAULT 'medium'")
-        except Exception:
-            pass  # Column already exists
-        # Migrations for v2 → v3: SimpleFIN source tracking columns
-        try:
-            await db.execute("ALTER TABLE holdings ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE holdings ADD COLUMN simplefin_holding_id TEXT")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE transactions ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'")
-        except Exception:
-            pass
-        try:
-            await db.execute("ALTER TABLE transactions ADD COLUMN simplefin_transaction_id TEXT")
-        except Exception:
-            pass
+        await _apply_migrations(db)
+        await db.commit()
+        # Startup reconciliation: analysis runs and their SSE queues live in
+        # memory, so anything still 'running' after a restart can never
+        # complete. Mark it failed instead of leaving a zombie.
         await db.execute(
-            "INSERT OR IGNORE INTO schema_version (version) VALUES (?)",
-            (SCHEMA_VERSION,),
+            "UPDATE analysis_runs SET status = 'failed', "
+            "error_message = 'Interrupted by server restart', "
+            "completed_at = datetime('now') WHERE status = 'running'"
         )
         await db.commit()
     finally:

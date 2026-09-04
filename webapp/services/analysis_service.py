@@ -1,92 +1,36 @@
 """
-Analysis service — bridges the webapp to TradingAgentsGraph.
-Runs analyses in background tasks and stores results in SQLite.
+Analysis service — runs analyses in background tasks and stores results.
+
+The graph-facing work lives in ``graph_runner`` (the single seam that imports
+tradingagents); this module only orchestrates: DB rows, the in-memory task
+registry, the per-run SSE event queue, and streaming to the client.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import traceback
-from datetime import datetime
+from contextlib import suppress
 
 from ..database import get_db
 from .portfolio_service import build_portfolio_context
 
 logger = logging.getLogger(__name__)
 
-# We import TradingAgentsGraph lazily so the webapp starts even if
-# the tradingagents package has issues (useful for portfolio management only).
-_tradingagents_available = True
-try:
-    from tradingagents.graph.trading_graph import TradingAgentsGraph
-except Exception:
-    _tradingagents_available = False
-    logger.warning("TradingAgentsGraph not available — analysis will be disabled.")
-
 
 # ── Background task runner ────────────────────────────────────────────────────
 
-# In-memory registry of running tasks and SSE event queues.
+# In-memory registry of running tasks and SSE event queues. Runs are reconciled
+# at startup (database.init_db) so a restart can't leave rows stuck 'running'.
 _running_tasks: dict[int, asyncio.Task] = {}
 _event_queues: dict[int, asyncio.Queue] = {}
 
 
-def _depth_config(depth: str) -> dict:
-    """Return graph configuration for the given analysis depth."""
-    configs = {
-        "quick": {
-            "selected_analysts": ("market", "fundamentals"),
-            "config_overrides": {
-                "max_debate_rounds": 0,
-                "max_risk_discuss_rounds": 0,
-                "news_article_limit": 5,
-                "global_news_article_limit": 3,
-            },
-        },
-        "medium": {
-            "selected_analysts": ("market", "social", "news", "fundamentals"),
-            "config_overrides": {
-                "max_debate_rounds": 1,
-                "max_risk_discuss_rounds": 1,
-                "news_article_limit": 20,
-                "global_news_article_limit": 10,
-            },
-        },
-        "deep": {
-            "selected_analysts": ("market", "social", "news", "fundamentals"),
-            "config_overrides": {
-                "max_debate_rounds": 2,
-                "max_risk_discuss_rounds": 2,
-                "news_article_limit": 30,
-                "global_news_article_limit": 15,
-            },
-        },
-    }
-    return configs.get(depth, configs["medium"])
-
-
-def _node_to_agent(node_name: str) -> str:
-    """Map a graph node name to a human-readable agent name."""
-    mapping = {
-        "market_analyst": "Market Analyst",
-        "sentiment_analyst": "Sentiment Analyst",
-        "news_analyst": "News Analyst",
-        "fundamentals_analyst": "Fundamentals Analyst",
-        "bull_researcher": "Bull Researcher",
-        "bear_researcher": "Bear Researcher",
-        "research_manager": "Research Manager",
-        "trader": "Trader",
-        "aggressive_risk": "Risk Analyst (Aggressive)",
-        "conservative_risk": "Risk Analyst (Conservative)",
-        "neutral_risk": "Risk Analyst (Neutral)",
-        "portfolio_manager": "Portfolio Manager",
-    }
-    return mapping.get(node_name, node_name.replace("_", " ").title())
-
-
 async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
     """Execute an analysis in the background, streaming agent outputs via SSE."""
+    from .graph_runner import run_graph_and_collect
+
     db = await get_db()
     try:
         cursor = await db.execute("SELECT * FROM analysis_runs WHERE id = ?", (run_id,))
@@ -97,147 +41,30 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
             return
         run = dict(run)
 
-        if not _tradingagents_available:
-            raise RuntimeError("TradingAgentsGraph is not available.")
-
         user_id = run["user_id"]
         portfolio_context = await build_portfolio_context(user_id)
 
-        # Configure graph based on analysis depth
-        from tradingagents.default_config import DEFAULT_CONFIG
-        depth_cfg = _depth_config(run["analysis_depth"])
+        # Merge user's LLM settings (provider, model, key) — the runner merges
+        # them over DEFAULT_CONFIG + the depth config.
+        from .user_service import get_user_llm_config
 
-        # Merge user's LLM settings (provider, api_key, model choices) into config
-        from ..services.user_service import get_user_llm_config
         user_llm = await get_user_llm_config(user_id)
-        if user_llm:
-            # Only override provider/model/key from user settings;
-            # everything else stays as DEFAULT_CONFIG or depth overrides.
-            config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
-            config["llm_provider"] = user_llm.get("llm_provider", config["llm_provider"])
-            if user_llm.get("deep_think_llm"):
-                config["deep_think_llm"] = user_llm["deep_think_llm"]
-            if user_llm.get("quick_think_llm"):
-                config["quick_think_llm"] = user_llm["quick_think_llm"]
-            if user_llm.get("backend_url"):
-                config["backend_url"] = user_llm["backend_url"]
-            if user_llm.get("temperature") is not None:
-                config["temperature"] = user_llm["temperature"]
-            if user_llm.get("google_thinking_level"):
-                config["google_thinking_level"] = user_llm["google_thinking_level"]
-            if user_llm.get("openai_reasoning_effort"):
-                config["openai_reasoning_effort"] = user_llm["openai_reasoning_effort"]
-            if user_llm.get("anthropic_effort"):
-                config["anthropic_effort"] = user_llm["anthropic_effort"]
-            # The per-user API key flows through config, then into llm_kwargs
-            # via _get_provider_kwargs → the client factory's **kwargs
-            if user_llm.get("api_key"):
-                config["api_key"] = user_llm["api_key"]
-        else:
-            config = {**DEFAULT_CONFIG, **depth_cfg["config_overrides"]}
 
-        ta = TradingAgentsGraph(
-            debug=False,
-            selected_analysts=depth_cfg["selected_analysts"],
-            config=config,
-        )
-
-        # Run the graph with streaming in a thread, pushing events to the queue
         loop = asyncio.get_event_loop()
-
-        # Map state keys to display names and track which ones we've emitted
-        _REPORT_KEYS = [
-            ("market_report", "Market Analyst"),
-            ("sentiment_report", "Sentiment Analyst"),
-            ("news_report", "News Analyst"),
-            ("fundamentals_report", "Fundamentals Analyst"),
-        ]
-        _DEBATE_KEYS = [
-            ("investment_debate_state", "Bull/Bear Debate"),
-            ("risk_debate_state", "Risk Debate"),
-        ]
-        _FINAL_KEYS = [
-            ("trader_investment_plan", "Trader"),
-            ("final_trade_decision", "Portfolio Manager"),
-        ]
-
-        def _stream_and_collect():
-            """Run graph.stream() and push agent outputs as state keys become populated."""
-            past_context = ta.memory_log.get_past_context(run["ticker"])
-            instrument_context = ta.resolve_instrument_context(run["ticker"], "stock")
-            init_state = ta.propagator.create_initial_state(
-                run["ticker"], run["analysis_date"],
-                past_context=past_context,
-                instrument_context=instrument_context,
+        summary = await loop.run_in_executor(
+            None,
+            lambda: run_graph_and_collect(
+                ticker=run["ticker"],
+                analysis_date=run["analysis_date"],
+                analysis_depth=run["analysis_depth"],
+                user_llm=user_llm,
                 portfolio_context=portfolio_context,
-            )
-            args = ta.propagator.get_graph_args()
-
-            final_state = {}
-            emitted = set()
-
-            for chunk in ta.graph.stream(init_state, **args):
-                final_state.update(chunk)
-
-                # Emit a heartbeat every few chunks so the frontend knows we're alive
-                # Check all report keys for newly populated content
-                for state_key, agent_name in _REPORT_KEYS + _DEBATE_KEYS + _FINAL_KEYS:
-                    if state_key in emitted:
-                        continue
-                    val = final_state.get(state_key)
-                    if not val:
-                        continue
-                    # For dict-based state, check if it has meaningful content
-                    content = None
-                    if isinstance(val, str) and val.strip():
-                        content = val
-                    elif isinstance(val, dict):
-                        # Investment debate: look for bull_history, bear_history, or history
-                        for sub in ("bull_history", "bear_history", "history", "aggressive_history"):
-                            if val.get(sub) and str(val[sub]).strip():
-                                content = str(val[sub])
-                                break
-                        if not content and val.get("current_response"):
-                            content = str(val["current_response"])
-                    if content:
-                        emitted.add(state_key)
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            {"type": "agent", "agent_name": agent_name, "content": str(content)[:3000]},
-                        )
-
-                # Also emit the latest message content for progress updates
-                msgs = final_state.get("messages", [])
-                if msgs:
-                    last = msgs[-1]
-                    txt = getattr(last, "content", "")
-                    if txt and hasattr(last, "tool_calls") and getattr(last, "tool_calls", None):
-                        # This is a tool call — show as status update
-                        loop.call_soon_threadsafe(
-                            queue.put_nowait,
-                            {"type": "status", "content": str(txt)[:500]},
-                        )
-
-            # Push completion event
-            rating = _extract_rating(final_state.get("final_trade_decision", ""))
-            entry_price = _extract_entry_price(final_state.get("trader_investment_plan", ""))
-            stop_loss = _extract_stop_loss(final_state.get("trader_investment_plan", ""))
-
-            loop.call_soon_threadsafe(
-                queue.put_nowait,
-                {"type": "complete", "rating": rating, "entry_price": entry_price,
-                 "stop_loss": stop_loss},
-            )
-
-            return final_state, rating, entry_price, stop_loss
-
-        final_state, rating, entry_price, stop_loss = await loop.run_in_executor(
-            None, _stream_and_collect,
+                emit=lambda event: loop.call_soon_threadsafe(queue.put_nowait, event),
+            ),
         )
 
-        # Store results in DB
-        results = _extract_results(final_state)
-        for r in results:
+        # Store per-agent outputs
+        for r in summary["results"]:
             await db.execute(
                 """INSERT INTO analysis_results (analysis_run_id, agent_name, output_type, content)
                    VALUES (?, ?, ?, ?)""",
@@ -249,17 +76,23 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
                SET status = 'completed', rating = ?, entry_price = ?, stop_loss = ?,
                    completed_at = datetime('now')
                WHERE id = ?""",
-            (rating, entry_price, stop_loss, run_id),
+            (summary["rating"], summary["entry_price"], summary["stop_loss"], run_id),
         )
         await db.commit()
 
+        queue.put_nowait(
+            {
+                "type": "complete",
+                "rating": summary["rating"],
+                "entry_price": summary["entry_price"],
+                "stop_loss": summary["stop_loss"],
+            }
+        )
+
     except Exception as e:
         logger.exception("Analysis run %d failed: %s", run_id, e)
-        if queue is not None:
-            try:
-                queue.put_nowait({"type": "error", "error": str(e)[:500]})
-            except Exception:
-                pass
+        with suppress(Exception):
+            queue.put_nowait({"type": "error", "error": str(e)[:500]})
         try:
             await db.execute(
                 "UPDATE analysis_runs SET status = 'failed', error_message = ?, "
@@ -272,46 +105,16 @@ async def run_analysis_background(run_id: int, queue: asyncio.Queue) -> None:
     finally:
         await db.close()
         _running_tasks.pop(run_id, None)
-        # Signal end of stream
-        if queue is not None:
-            try:
-                queue.put_nowait(None)  # Sentinel to close SSE
-            except Exception:
-                pass
-            _event_queues.pop(run_id, None)
-
-
-def _extract_chunk_content(node_output, node_name: str) -> str | None:
-    """Extract meaningful content from a streaming chunk for the given node."""
-    # node_output is a list of LangGraph messages, or a dict with state
-    if isinstance(node_output, list):
-        if not node_output:
-            return None
-        last_msg = node_output[-1]
-        content = getattr(last_msg, "content", None)
-        if content:
-            return str(content)
-        return None
-    if isinstance(node_output, dict):
-        messages = node_output.get("messages", [])
-        if messages:
-            last_msg = messages[-1]
-            content = getattr(last_msg, "content", None)
-            if content:
-                return str(content)
-        for key in ("market_report", "sentiment_report", "news_report", "fundamentals_report",
-                     "investment_plan", "trader_investment_plan", "final_trade_decision"):
-            val = node_output.get(key)
-            if val:
-                return str(val)[:3000]
-    return None
+        with suppress(Exception):
+            queue.put_nowait(None)  # Sentinel to close SSE
+        _event_queues.pop(run_id, None)
 
 
 async def stream_analysis_events(run_id: int):
     """Async generator that yields SSE-formatted events for an analysis run."""
     queue = _event_queues.get(run_id)
     if queue is None:
-        yield f"event: error\ndata: {{\"error\": \"Run not found or already completed\"}}\n\n"
+        yield f"event: error\ndata: {json.dumps({'error': 'Run not found or already completed'})}\n\n"
         return
 
     agent_count = 0
@@ -319,37 +122,36 @@ async def stream_analysis_events(run_id: int):
         try:
             event = await asyncio.wait_for(queue.get(), timeout=600.0)
         except asyncio.TimeoutError:
-            yield f"event: error\ndata: {{\"error\": \"Stream timed out\"}}\n\n"
+            yield f"event: error\ndata: {json.dumps({'error': 'Stream timed out'})}\n\n"
             return
 
         if event is None:  # Sentinel
             return
 
-        if event["type"] == "agent":
+        event_type = event["type"]
+        if event_type == "agent":
             agent_count += 1
-            import json
-            data = json.dumps({
-                "agent_name": event["agent_name"],
-                "content": event["content"],
-                "index": agent_count,
-            })
-            yield f"event: agent\ndata: {data}\n\n"
-        elif event["type"] == "status":
-            import json
-            data = json.dumps({"content": event["content"]})
-            yield f"event: status\ndata: {data}\n\n"
-        elif event["type"] == "complete":
-            import json
-            data = json.dumps({
-                "rating": event["rating"],
-                "entry_price": event["entry_price"],
-                "stop_loss": event["stop_loss"],
-            })
-            yield f"event: complete\ndata: {data}\n\n"
-        elif event["type"] == "error":
-            import json
-            data = json.dumps({"error": event["error"]})
-            yield f"event: error\ndata: {data}\n\n"
+            data = json.dumps(
+                {
+                    "agent_name": event["agent_name"],
+                    "content": event["content"],
+                    "index": agent_count,
+                }
+            )
+        elif event_type in ("status", "error"):
+            data = json.dumps({"content": event["content"]} if event_type == "status" else {"error": event["error"]})
+        elif event_type == "complete":
+            data = json.dumps(
+                {
+                    "rating": event["rating"],
+                    "entry_price": event["entry_price"],
+                    "stop_loss": event["stop_loss"],
+                }
+            )
+        else:
+            continue
+        yield f"event: {event_type}\ndata: {data}\n\n"
+        if event_type == "error":
             return
 
 
@@ -457,7 +259,7 @@ async def get_analysis_history(
         await db.close()
 
 
-async def get_analysis_detail(run_id: int) -> Optional[dict]:
+async def get_analysis_detail(run_id: int) -> dict | None:
     """Get full analysis detail with all agent outputs."""
     db = await get_db()
     try:
@@ -485,99 +287,3 @@ async def get_analysis_detail(run_id: int) -> Optional[dict]:
         }
     finally:
         await db.close()
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-# Order mirrors the agent execution flow
-_AGENT_OUTPUT_KEYS = [
-    ("portfolio_manager", "final_trade_decision", "structured_decision"),
-    ("market_analyst", "market_report", "market"),
-    ("sentiment_analyst", "sentiment_report", "sentiment"),
-    ("news_analyst", "news_report", "news"),
-    ("fundamentals_analyst", "fundamentals_report", "fundamentals"),
-    ("bull_researcher", "investment_debate_state", "bull_debate"),
-    ("bear_researcher", "investment_debate_state", "bear_debate"),
-    ("research_manager", "investment_plan", "structured_decision"),
-    ("trader", "trader_investment_plan", "structured_decision"),
-    ("aggressive_risk", "risk_debate_state", "risk_debate"),
-    ("conservative_risk", "risk_debate_state", "risk_debate"),
-    ("neutral_risk", "risk_debate_state", "risk_debate"),
-]
-
-
-def _extract_results(final_state: dict) -> list[dict]:
-    """Extract individual agent outputs from the final state."""
-    results = []
-    for agent_name, state_key, output_type in _AGENT_OUTPUT_KEYS:
-        content = final_state.get(state_key, "")
-        if not content:
-            continue
-
-        # For debate states, extract the relevant history
-        if output_type == "bull_debate":
-            debate = content if isinstance(content, dict) else {}
-            content = debate.get("bull_history", "") or debate.get("history", "")
-        elif output_type == "bear_debate":
-            debate = content if isinstance(content, dict) else {}
-            content = debate.get("bear_history", "") or debate.get("history", "")
-        elif output_type == "risk_debate":
-            debate = content if isinstance(content, dict) else {}
-            # Determine which risk analyst based on agent_name
-            if "aggressive" in agent_name:
-                content = debate.get("aggressive_history", "") or debate.get("history", "")
-            elif "conservative" in agent_name:
-                content = debate.get("conservative_history", "") or debate.get("history", "")
-            elif "neutral" in agent_name:
-                content = debate.get("neutral_history", "") or debate.get("history", "")
-            else:
-                content = debate.get("history", "")
-
-        if content:
-            results.append({
-                "agent_name": agent_name,
-                "output_type": output_type,
-                "content": str(content),
-            })
-
-    return results
-
-
-def _extract_rating(text: str) -> str:
-    """Extract 5-tier rating from the Portfolio Manager's structured output.
-
-    The PM renders ``**Rating**: Buy`` as its first line.  We anchor on that
-    exact pattern so we never accidentally pick up a rating word from an
-    embedded analyst quote (e.g. the Research Manager's recommendation).
-    """
-    import re
-    # Primary: structured Portfolio Manager format
-    match = re.search(
-        r"\*\*Rating\*\*:\s*(Buy|Overweight|Hold|Underweight|Sell)",
-        text,
-        re.IGNORECASE,
-    )
-    if match:
-        return match.group(1)
-    # Fallback: any rating word (legacy free-text output)
-    for rating in ["Buy", "Overweight", "Hold", "Underweight", "Sell"]:
-        if re.search(rf"\b{rating}\b", text, re.IGNORECASE):
-            return rating
-    return "Unknown"
-
-
-def _extract_entry_price(text: str) -> Optional[float]:
-    """Extract entry price from trader plan."""
-    import re
-    match = re.search(r"[Ee]ntry\s*[Pp]rice[:\s]*\$?([\d,.]+)", text)
-    return float(match.group(1).replace(",", "")) if match else None
-
-
-def _extract_stop_loss(text: str) -> Optional[float]:
-    """Extract stop loss from trader plan."""
-    import re
-    match = re.search(r"[Ss]top\s*[Ll]oss[:\s]*\$?([\d,.]+)", text)
-    return float(match.group(1).replace(",", "")) if match else None
-
-
-

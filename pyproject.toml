@@ -33,6 +33,7 @@ dependencies = [
     "yfinance>=1.4.1",
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
+    "httpx>=0.28.0",
     "aiosqlite>=0.21.0",
     "python-jose[cryptography]>=3.3.0",
     "itsdangerous>=2.0",
@@ -58,6 +59,9 @@ include = ["tradingagents*", "cli*", "webapp*"]
 
 [tool.setuptools.package-data]
 cli = ["static/*"]
+# The SPA has no build step: ship it so a non-editable `pip install .` gets a
+# working webapp, not just the API (static/ is resolved from the package dir).
+webapp = ["static/*", "static/css/*", "static/js/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -86,6 +90,9 @@ ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
 "**/__init__.py" = ["F401"]   # intentional re-exports
+# FastAPI dependency injection puts Depends() calls in argument defaults;
+# that is the framework's idiom, not an accidental side effect.
+"webapp/routers/*.py" = ["B008"]
 
 [tool.ruff.lint.isort]
 # Keep multiple aliased names from one module in a single combined import block

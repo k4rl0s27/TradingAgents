@@ -6,7 +6,7 @@ Also builds the portfolio_context string injected into agent prompts.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from datetime import datetime
 
 import yfinance as yf
 
@@ -31,7 +31,7 @@ async def get_latest_cash(user_id: int) -> float:
         await db.close()
 
 
-async def set_cash(user_id: int, amount: float, date: str, notes: Optional[str] = None) -> dict:
+async def set_cash(user_id: int, amount: float, date: str, notes: str | None = None) -> dict:
     """Record a new cash balance."""
     db = await get_db()
     try:
@@ -86,7 +86,7 @@ async def get_all_holdings(user_id: int) -> list[dict]:
         await db.close()
 
 
-async def get_holding(user_id: int, ticker: str) -> Optional[dict]:
+async def get_holding(user_id: int, ticker: str) -> dict | None:
     """Get a single holding by ticker."""
     db = await get_db()
     try:
@@ -100,7 +100,7 @@ async def get_holding(user_id: int, ticker: str) -> Optional[dict]:
         await db.close()
 
 
-async def get_holding_by_id(user_id: int, holding_id: int) -> Optional[dict]:
+async def get_holding_by_id(user_id: int, holding_id: int) -> dict | None:
     """Get a single holding by its primary key."""
     db = await get_db()
     try:
@@ -118,7 +118,7 @@ async def upsert_holding(
     user_id: int,
     ticker: str,
     quantity: float,
-    avg_cost: Optional[float] = None,
+    avg_cost: float | None = None,
     asset_type: str = "stock",
 ) -> dict:
     """Add or update a holding. Uses (user_id, ticker) as unique key."""
@@ -177,7 +177,7 @@ async def get_transactions(user_id: int, limit: int = 50) -> list[dict]:
         await db.close()
 
 
-async def get_transaction_by_id(user_id: int, tx_id: int) -> Optional[dict]:
+async def get_transaction_by_id(user_id: int, tx_id: int) -> dict | None:
     """Get a single transaction by its primary key."""
     db = await get_db()
     try:
@@ -199,7 +199,7 @@ async def record_transaction(
     price: float,
     fees: float = 0,
     date: str = "",
-    notes: Optional[str] = None,
+    notes: str | None = None,
 ) -> dict:
     """Record a buy/sell transaction and automatically update the holding."""
     total = quantity * price
@@ -360,6 +360,10 @@ async def get_current_prices(tickers: list[str]) -> dict[str, dict]:
 async def build_portfolio_context(user_id: int) -> str:
     """Build a markdown summary of the user's portfolio for agent prompts.
 
+    Holdings are valued at the latest Yahoo Finance price (falling back to
+    avg cost when a quote is unavailable), so the agent sees real weights and
+    unrealized P&L rather than cost-basis proxies.
+
     Returns an empty string if no holdings or cash are recorded.
     """
     holdings = await get_all_holdings(user_id)
@@ -368,33 +372,44 @@ async def build_portfolio_context(user_id: int) -> str:
     if not holdings and cash == 0:
         return ""
 
-    lines = ["## Your Current Portfolio"]
+    # Snapshot date: the context reflects the CURRENT book even when the
+    # analysis date is historical — the agent manages the live portfolio.
+    today = datetime.now().strftime("%Y-%m-%d")
 
-    # Cash position
+    prices = await get_current_prices([h["ticker"] for h in holdings])
+
+    lines = [f"- **Portfolio snapshot**: {today} (cash + holdings at market price)"]
     lines.append(f"- **Cash Available**: ${cash:,.2f}")
 
-    # Calculate total portfolio value
+    # Total portfolio value at market prices; missing quotes fall back to cost.
+    valued = []
     total_value = cash
-    holding_summaries = []
     for h in holdings:
-        # We use avg_cost as a proxy for current value since we don't have live prices here.
-        # The agent will see real prices from the data tools.
-        position_value = h["quantity"] * (h["avg_cost"] or 0)
-        total_value += position_value
-        if position_value > 0 or h["quantity"] > 0:
-            holding_summaries.append((h, position_value))
+        quote = prices.get(h["ticker"].upper(), {})
+        price = quote.get("price")
+        qty = h["quantity"]
+        value = qty * (price if price else (h["avg_cost"] or 0))
+        total_value += value
+        valued.append((h, price, value))
 
     lines.append(f"- **Total Portfolio Value**: ${total_value:,.2f}")
 
-    if holding_summaries:
-        lines.append("\n### Current Holdings")
-        lines.append("| Ticker | Shares | Avg Cost | Est. Value | Weight |")
-        lines.append("|--------|--------|----------|------------|--------|")
-        for h, val in holding_summaries:
-            weight_pct = (val / total_value * 100) if total_value > 0 else 0
+    if valued:
+        lines.append("\n### Current Holdings (market value)")
+        lines.append("| Ticker | Shares | Last Price | Avg Cost | Value | Unrealized | Weight |")
+        lines.append("|--------|--------|-----------|----------|-------|------------|--------|")
+        for h, price, value in valued:
+            weight_pct = (value / total_value * 100) if total_value > 0 else 0
+            cost = h["avg_cost"] or 0
+            if price:
+                unrealized = f"{((price / cost) - 1) * 100:.1f}%" if cost else "—"
+                price_txt = f"${price:,.2f}"
+            else:
+                unrealized = "n/a (valued at cost)"
+                price_txt = "n/a"
             lines.append(
-                f"| {h['ticker']} | {h['quantity']:,.2f} | "
-                f"${h['avg_cost']:,.2f} | ${val:,.2f} | {weight_pct:.1f}% |"
+                f"| {h['ticker']} | {h['quantity']:,.2f} | {price_txt} | "
+                f"${cost:,.2f} | ${value:,.2f} | {unrealized} | {weight_pct:.1f}% |"
             )
 
     # Recent transactions context

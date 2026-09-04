@@ -11,11 +11,10 @@ import base64
 import logging
 import re
 from datetime import datetime, timezone
-from typing import Optional
 
 import httpx
 
-from ..crypto import encrypt_api_key, decrypt_api_key
+from ..crypto import decrypt_api_key, encrypt_api_key
 from ..database import get_db
 
 logger = logging.getLogger(__name__)
@@ -53,7 +52,7 @@ def _build_ticker_map(holdings: list[dict]) -> dict[str, str]:
 
 def parse_transaction_description(
     description: str, ticker_map: dict[str, str]
-) -> Optional[dict]:
+) -> dict | None:
     """Parse a SimpleFIN transaction description into structured fields.
 
     Returns
@@ -114,7 +113,7 @@ async def store_access_url(user_id: int, access_url: str) -> None:
         await db.close()
 
 
-async def get_access_url(user_id: int) -> Optional[str]:
+async def get_access_url(user_id: int) -> str | None:
     """Retrieve and decrypt the stored Access URL, or *None*."""
     db = await get_db()
     try:
@@ -157,7 +156,7 @@ async def claim_token(base64_token: str) -> str:
     try:
         claim_url = base64.b64decode(base64_token).decode().strip()
     except Exception:
-        raise ValueError("Invalid SimpleFIN Token — could not Base64-decode.")
+        raise ValueError("Invalid SimpleFIN Token — could not Base64-decode.") from None
 
     if not claim_url.startswith("https://"):
         raise ValueError(
@@ -263,7 +262,7 @@ async def link_account(
         await db.close()
 
 
-async def get_linked_account(user_id: int) -> Optional[dict]:
+async def get_linked_account(user_id: int) -> dict | None:
     """Return the linked SimpleFIN account row, or *None*."""
     db = await get_db()
     try:

@@ -6,11 +6,8 @@ API keys are encrypted at rest via webapp.crypto.
 
 from __future__ import annotations
 
-from typing import Optional
-
-from ..crypto import encrypt_api_key, decrypt_api_key
+from ..crypto import decrypt_api_key, encrypt_api_key
 from ..database import get_db
-
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 

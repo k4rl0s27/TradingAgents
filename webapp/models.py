@@ -4,11 +4,7 @@ Pydantic models for the TradingAgents webapp API.
 
 from __future__ import annotations
 
-from datetime import date as Date
-from typing import Optional
-
 from pydantic import BaseModel, Field
-
 
 # ── Holdings ──────────────────────────────────────────────────────────────────
 
@@ -16,14 +12,14 @@ class HoldingCreate(BaseModel):
     ticker: str = Field(..., min_length=1, max_length=20, description="Ticker symbol")
     asset_type: str = Field(default="stock", description="Asset type: stock, crypto")
     quantity: float = Field(..., gt=0, description="Number of shares/coins")
-    avg_cost: Optional[float] = Field(default=None, ge=0, description="Average cost basis per share")
+    avg_cost: float | None = Field(default=None, ge=0, description="Average cost basis per share")
 
 
 class HoldingUpdate(BaseModel):
-    ticker: Optional[str] = None
-    asset_type: Optional[str] = None
-    quantity: Optional[float] = Field(default=None, gt=0)
-    avg_cost: Optional[float] = Field(default=None, ge=0)
+    ticker: str | None = None
+    asset_type: str | None = None
+    quantity: float | None = Field(default=None, gt=0)
+    avg_cost: float | None = Field(default=None, ge=0)
 
 
 class HoldingResponse(BaseModel):
@@ -31,7 +27,7 @@ class HoldingResponse(BaseModel):
     ticker: str
     asset_type: str
     quantity: float
-    avg_cost: Optional[float]
+    avg_cost: float | None
     source: str = "manual"
     created_at: str
     updated_at: str
@@ -46,7 +42,7 @@ class TransactionCreate(BaseModel):
     price: float = Field(..., gt=0)
     fees: float = Field(default=0, ge=0)
     date: str = Field(..., description="Trade date YYYY-MM-DD")
-    notes: Optional[str] = Field(default=None)
+    notes: str | None = Field(default=None)
 
 
 class TransactionResponse(BaseModel):
@@ -58,7 +54,7 @@ class TransactionResponse(BaseModel):
     total_amount: float
     fees: float
     date: str
-    notes: Optional[str]
+    notes: str | None
     source: str = "manual"
     created_at: str
 
@@ -68,14 +64,14 @@ class TransactionResponse(BaseModel):
 class CashBalanceCreate(BaseModel):
     amount: float = Field(..., ge=0)
     date: str = Field(..., description="Date YYYY-MM-DD")
-    notes: Optional[str] = Field(default=None)
+    notes: str | None = Field(default=None)
 
 
 class CashBalanceResponse(BaseModel):
     id: int
     amount: float
     date: str
-    notes: Optional[str]
+    notes: str | None
     created_at: str
 
 
@@ -105,10 +101,10 @@ class AnalysisRunResponse(BaseModel):
     analysis_type: str
     analysis_date: str
     status: str
-    rating: Optional[str] = None
+    rating: str | None = None
     created_at: str
-    completed_at: Optional[str] = None
-    error_message: Optional[str] = None
+    completed_at: str | None = None
+    error_message: str | None = None
 
 
 class AnalysisResultItem(BaseModel):
@@ -129,10 +125,10 @@ class AnalysisDetailResponse(BaseModel):
 class UserResponse(BaseModel):
     id: int
     sub: str
-    email: Optional[str] = None
-    display_name: Optional[str] = None
+    email: str | None = None
+    display_name: str | None = None
     is_initialized: bool
-    options: Optional[dict] = None  # Phase 2
+    options: dict | None = None  # Phase 2
 
 
 class AnalysisHistoryResponse(BaseModel):
@@ -184,4 +180,4 @@ class SimpleFINSyncResponse(BaseModel):
 
 class SimpleFINStatusResponse(BaseModel):
     connected: bool
-    linked_account: Optional[dict] = None
+    linked_account: dict | None = None

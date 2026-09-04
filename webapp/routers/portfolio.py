@@ -2,17 +2,16 @@
 Portfolio API routes — holdings, transactions, cash balance.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from ..models import (
     CashBalanceCreate,
     CashBalanceResponse,
     HoldingCreate,
     HoldingUpdate,
-    PortfolioSummary,
+    StatusResponse,
     TransactionCreate,
     TransactionResponse,
-    StatusResponse,
 )
 from ..routers.auth import get_current_user
 from ..services import portfolio_service as svc

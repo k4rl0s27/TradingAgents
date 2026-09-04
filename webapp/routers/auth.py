@@ -5,7 +5,7 @@ Auth routes — OIDC login, callback, user info, logout.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+import os
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -15,14 +15,52 @@ from ..auth import (
     get_authorization_url_simple,
     is_configured,
 )
-from ..services.user_service import upsert_user, get_user_by_sub
+from ..services.user_service import get_user_by_sub, upsert_user
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# Fixed identity for local development when OIDC is not configured (no
+# Authentik/IdP to log in against). Never enabled while OIDC is configured.
+_DEV_SUB = "webapp-dev-local"
+_DEV_EMAIL = "dev@local"
+
+
+def dev_autologin_enabled() -> bool:
+    """Whether the dev-only autologin fallback is on.
+
+    Set ``WEBAPP_DEV_AUTOLOGIN=1`` in ``.env`` AND leave the OIDC_* vars unset
+    to run the app without an identity provider (local development only).
+    The fallback is ignored whenever OIDC is configured.
+    """
+    from ..auth import is_configured
+
+    return os.environ.get("WEBAPP_DEV_AUTOLOGIN") == "1" and not is_configured()
+
 
 # ── Auth dependency (also imported by other modules) ──────────────────────────
+
+async def _session_user(request: Request) -> dict | None:
+    """Return the session's user row, auto-provisioning the dev user in dev mode."""
+    user = request.session.get("user")
+    if user:
+        db_user = await get_user_by_sub(user["sub"])
+        if db_user:
+            return db_user
+        request.session.clear()  # Session references a deleted user
+
+    if dev_autologin_enabled():
+        db_user = await upsert_user(_DEV_SUB, email=_DEV_EMAIL, name="Local Dev")
+        request.session["user"] = {
+            "sub": _DEV_SUB,
+            "user_id": db_user["id"],
+            "email": _DEV_EMAIL,
+            "name": "Local Dev",
+        }
+        return db_user
+    return None
+
 
 async def get_current_user(request: Request) -> dict:
     """FastAPI dependency: return the current user from session, or 401.
@@ -32,14 +70,9 @@ async def get_current_user(request: Request) -> dict:
         async def something(user: dict = Depends(get_current_user)):
             ...
     """
-    user = request.session.get("user")
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    # Refresh from DB to get latest is_initialized state
-    db_user = await get_user_by_sub(user["sub"])
+    db_user = await _session_user(request)
     if not db_user:
-        request.session.clear()
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return db_user
 
 
@@ -80,7 +113,7 @@ async def callback(request: Request, code: str = "", state: str = ""):
         claims = await exchange_code(code, code_verifier)
     except Exception as e:
         logger.exception("Token exchange failed")
-        raise HTTPException(status_code=400, detail=f"Authentication failed: {e}")
+        raise HTTPException(status_code=400, detail=f"Authentication failed: {e}") from e
 
     sub = claims.get("sub")
     if not sub:
@@ -109,13 +142,9 @@ async def callback(request: Request, code: str = "", state: str = ""):
 @router.get("/me")
 async def me(request: Request):
     """Return the current authenticated user's info."""
-    user = request.session.get("user")
-    if not user:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    db_user = await get_user_by_sub(user["sub"])
+    db_user = await _session_user(request)
     if not db_user:
-        request.session.clear()
-        raise HTTPException(status_code=401, detail="User not found")
+        raise HTTPException(status_code=401, detail="Not authenticated")
     return {
         "id": db_user["id"],
         "sub": db_user["oidc_sub"],

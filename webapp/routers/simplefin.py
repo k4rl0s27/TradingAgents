@@ -10,8 +10,8 @@ from ..models import (
     SimpleFINAccountListResponse,
     SimpleFINConnectRequest,
     SimpleFINLinkRequest,
-    SimpleFINSyncResponse,
     SimpleFINStatusResponse,
+    SimpleFINSyncResponse,
     StatusResponse,
 )
 from ..routers.auth import get_current_user
@@ -33,9 +33,9 @@ async def connect(body: SimpleFINConnectRequest, user: dict = Depends(get_curren
     try:
         access_url = await sfin.claim_token(body.token)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to claim token: {exc}")
+        raise HTTPException(status_code=502, detail=f"Failed to claim token: {exc}") from exc
 
     # 2. Store encrypted Access URL
     await sfin.store_access_url(user["id"], access_url)
@@ -44,9 +44,9 @@ async def connect(body: SimpleFINConnectRequest, user: dict = Depends(get_curren
     try:
         accounts = await sfin.fetch_accounts(access_url)
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from None
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to fetch accounts: {exc}")
+        raise HTTPException(status_code=502, detail=f"Failed to fetch accounts: {exc}") from exc
 
     if not accounts:
         raise HTTPException(
@@ -101,11 +101,11 @@ async def sync(user: dict = Depends(get_current_user)):
     try:
         result = await sfin.sync_portfolio(user["id"])
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from None
     except PermissionError as exc:
-        raise HTTPException(status_code=403, detail=str(exc))
+        raise HTTPException(status_code=403, detail=str(exc)) from None
     except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Sync failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Sync failed: {exc}") from exc
 
     return SimpleFINSyncResponse(
         status="ok",

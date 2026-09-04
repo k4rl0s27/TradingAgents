@@ -4,12 +4,13 @@ Settings routes — user LLM provider configuration (setup wizard API).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
+
+from tradingagents.llm_clients.model_catalog import get_model_options
 
 from ..routers.auth import get_current_user
 from ..services import user_service
-from tradingagents.llm_clients.model_catalog import get_model_options
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
