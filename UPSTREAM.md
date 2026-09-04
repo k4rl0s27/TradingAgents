@@ -1,0 +1,66 @@
+# Upstream sync runbook
+
+How to fold a new upstream release (TauricResearch/TradingAgents) into this
+fork. The goal: `tradingagents/` tracks upstream closely, the webapp keeps
+working, and the fork's own surface stays tiny and predictable.
+
+## Baseline
+
+- Local `main` tracks **upstream v0.4.1** (`9dee508`) as of this runbook's
+  writing. `upstream` is a git remote pointing at TauricResearch.
+- The webapp's core integration is deliberately layered:
+  - **`webapp/services/graph_runner.py`** is the *only* file in the webapp
+    that imports tradingagents graph internals (`TradingAgentsGraph`,
+    propagator, memory log, state keys, rating helpers). If upstream renames
+    or reshapes something, this is where the webapp breaks — fix it there.
+  - The fork's **core patch** is small and marked. When upstream changes one
+    of these hunks, keep the fork side; when the upstream hunk conflicts,
+    resolve in favor of upstream and re-apply the fork lines.
+
+## The fork's core patch (keep these on every merge)
+
+| File | Fork change | Conflicts with |
+|---|---|---|
+| `tradingagents/agents/trader/trader.py` | `portfolio_context` prompt section + grounding sentence — the only prompt edit the fork owns | upstream prompt edits (frequent) |
+| `tradingagents/agents/utils/agent_states.py` | `portfolio_context` state field | rare |
+| `tradingagents/graph/propagation.py` | `portfolio_context` param on `create_initial_state` + state key | rare |
+| `tradingagents/graph/trading_graph.py` | `config["api_key"]` forwarded in `_get_provider_kwargs` | upstream kwargs additions |
+| `tradingagents/llm_clients/openai_client.py` | per-request `api_key` precedence over env | upstream key handling |
+
+That's the whole delta. Deliberately NOT forked: `portfolio_manager.py` and
+the risk debators (portfolio reaches the PM through the upstream `past_context`
+channel), and any `propagate()`/`_run_graph()` signature changes.
+
+## Procedure
+
+1. `git fetch upstream && git checkout -b sync/upstream-vX.Y.Z main`
+2. `git merge upstream/vX.Y.Z` (or `upstream/main` between releases).
+3. Resolve:
+   - Files listed above: keep upstream shape, re-apply the fork hunks
+     (search for `fork(core)` markers in the file history/`git log -S`).
+   - Everything else under `tradingagents/`, `cli/`, `tests/`: take upstream
+     wholesale (`git checkout --theirs <file>`).
+   - `webapp/`, `pyproject.toml`, `docker-compose.yml`, `.env.example`:
+     ours, resolve normally (upstream rarely touches them).
+4. Verify before merging to `main`:
+   - `ruff check .` — repo is clean under the strict select.
+   - `python -m pytest -m unit` — fast core + webapp tests.
+   - `python -m pytest -q` — full suite (CI parity; needs `pip install -e ".[dev]"`).
+   - Boot the webapp once: `python -m uvicorn webapp.main:app` from the repo
+     root, hit `/api/health`.
+5. `git checkout main && git merge sync/upstream-vX.Y.Z` (keep the merge
+   commit; do not rebase upstream merges out of shared history).
+
+## Gotchas
+
+- The webapp bypasses `propagate()`: it builds the initial state itself
+  (`ta.propagator.create_initial_state(...)`) and streams via
+  `ta.graph.stream(...)`. Internal attributes it relies on: `ta.memory_log`,
+  `ta.propagator`, `ta.graph`, `resolve_instrument_context`,
+  `get_graph_args`. If upstream renames any of these, `graph_runner.py` is
+  the only casualty.
+- Memory-log context is fetched with `as_of=analysis_date` (point-in-time
+  gating); the portfolio block is appended to `past_context` for the PM and
+  passed as `portfolio_context` for the Trader.
+- `data/trading.db` is untracked and gitignored; it is created at startup.
+  A stale committed DB was removed in the v0.4.1 sync.

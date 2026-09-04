@@ -1,13 +1,13 @@
 # AGENTS.md
 
-Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) whose main addition is a **webapp** (FastAPI + hand-rolled vanilla-JS SPA: portfolio tracking, per-user LLM keys, OIDC login, SimpleFIN sync). Not intended for upstream contribution. Local `main` = upstream **v0.3.1** (`01477f9`) + webapp commits; `upstream/main` is ~27 commits ahead and `upstream/v0.4.x` tags exist but are unmerged. Pulling upstream will conflict in the core graph files the fork already touched.
+Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) whose main addition is a **webapp** (FastAPI + hand-rolled vanilla-JS SPA: portfolio tracking, per-user LLM keys, OIDC login, SimpleFIN sync). Not intended for upstream contribution. Local `main` tracks upstream **v0.4.1** (`9dee508`, merged via `sync/upstream-v0.4.1`) + webapp commits. **See `UPSTREAM.md` before pulling upstream** — it lists the fork's entire core patch (5 small hunks) and the merge procedure.
 
 ## Layout
 
-- `tradingagents/` — core library (LangGraph multi-agent pipeline, LLM clients, dataflows). The webapp drives it directly; it is not a frozen dependency.
+- `tradingagents/` — core library (LangGraph multi-agent pipeline, LLM clients, dataflows). Tracks upstream closely; the fork's only changes are the `fork(core):`-marked hunks in `UPSTREAM.md`.
 - `cli/` — upstream Typer CLI (`tradingagents` console script → `cli.main:app`).
-- `webapp/` — the fork's addition. `routers/` = FastAPI routes, `services/` = DB/graph bridging, `database.py` = aiosqlite schema + idempotent migrations, `static/` = plain JS/CSS SPA (no build step, edit files directly).
-- `tests/` — unit/integration for the core only; **there are no webapp tests** and CI does not exercise the webapp.
+- `webapp/` — the fork's addition. `routers/` = FastAPI routes, `services/` = DB/graph bridging, `database.py` = aiosqlite schema + versioned migrations, `static/` = plain JS/CSS SPA (no build step, edit files directly).
+- `tests/` — core unit/integration + the newer `test_webapp_*` unit tests (DB migrations, dev autologin, decision extraction, portfolio context). CI runs `pytest -q`; it does not start the webapp server.
 - `ui-reference/` — design mockups, not loaded at runtime.
 
 ## Commands
@@ -26,14 +26,15 @@ Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearc
 
 ## Webapp auth / data
 
-- Every `/api/*` route (and `/auth/me`) is gated by a session user via `get_current_user` → 401 without login. Login is **OIDC-only**: without `OIDC_ISSUER`/`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/`OIDC_REDIRECT_URI` (+`SECRET_KEY`) set, `/auth/login` returns 501 — there is no local/dev-login fallback. The comment in `static/js/app.js` ("runs without auth") is stale/misleading.
+- Every `/api/*` route (and `/auth/me`) is gated by a session user via `get_current_user` → 401 without login. Login is **OIDC-only**: without `OIDC_ISSUER`/`OIDC_CLIENT_ID`/`OIDC_CLIENT_SECRET`/`OIDC_REDIRECT_URI` (+`SECRET_KEY`) set, `/auth/login` returns 501. The one escape hatch is `WEBAPP_DEV_AUTOLOGIN=1` — **only** with OIDC unconfigured it provisions a fixed "Local Dev" user (see `webapp/routers/auth.py`); it is ignored whenever OIDC is configured.
 - Per-user API keys are stored encrypted in SQLite (Fernet key derived from `SECRET_KEY` in `webapp/crypto.py`). Rotating `SECRET_KEY` orphans every stored key (decryption then raises).
-- Webapp SQLite DB is repo-root `data/trading.db` — it is **committed to git** even though `.gitignore` has `*.db` (ignore only affects untracked files). Don't commit incidental DB churn; schema migrations run idempotently at startup.
-- Settings flow: user-selected provider/model/key override `tradingagents.default_config.DEFAULT_CONFIG` (see `analysis_service._depth_config` + `get_user_llm_config`). `TRADINGAGENTS_*` env vars also overlay `DEFAULT_CONFIG` regardless of entrypoint.
+- Webapp SQLite DB is repo-root `data/trading.db` — **untracked** (`.gitignore` has `*.db`), created at startup. Deleting it resets users/settings/history; migrations are versioned via the `schema_version` row (`SCHEMA_VERSION` in `webapp/database.py` — bump it when adding a `_MIGRATIONS` entry).
+- Settings flow: user-selected provider/model/key override `tradingagents.default_config.DEFAULT_CONFIG` (merge lives in `graph_runner._build_config` + `user_service.get_user_llm_config`). `TRADINGAGENTS_*` env vars also overlay `DEFAULT_CONFIG` regardless of entrypoint.
 
 ## Core-graph integration the webapp relies on
 
-The fork extended `TradingAgentsGraph` for the webapp; preserve these when editing core:
-- `propagate()` takes `portfolio_context`; config accepts a per-user `api_key` that bypasses env lookup (`tradingagents/graph/trading_graph.py`).
-- `analysis_service.run_analysis_background` calls `ta.graph.stream(...)` in a worker thread (the graph is sync), mapping emitted state keys to agent names, and pushes to a per-run `asyncio.Queue` consumed by the SSE endpoint `/api/analysis/stream/{id}`.
+Everything graph-facing lives in **`webapp/services/graph_runner.py`** — the single seam that imports tradingagents (routers/SSE/DB layers never do). Preserve when editing core:
+- The Trader prompt reads state key `portfolio_context` (the fork's only prompt edit); the Portfolio Manager receives the portfolio block through the existing `past_context` channel — no PM/debator edits exist anymore.
+- Config accepts a per-user `api_key` that bypasses env lookup (`_get_provider_kwargs` + `openai_client`, both `fork(core):`-marked).
+- `graph_runner` builds the initial state itself (`ta.propagator.create_initial_state`, memory log fetched with `as_of=analysis_date`) and streams via `ta.graph.stream(...)` in a worker thread (the graph is sync), mapping emitted state keys to agent names and pushing to a per-run `asyncio.Queue` consumed by the SSE endpoint `/api/analysis/stream/{id}`.
 - The `options` analysis type is stubbed (`start_analysis` raises `NotImplementedError`).
