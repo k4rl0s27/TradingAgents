@@ -7,9 +7,17 @@
 .DS_Store
 __pycache__
 *.egg-info
+.pytest_cache
 build
 dist
 results
 eval_results
+node_modules
+# Runtime-generated local data (dev DB, caches) — never ship or bake in.
+data/
+# Node sources are not needed at runtime: webapp/static is the committed
+# build output the image serves. Excluding node_modules keeps the context
+# and image small; ui/ sources themselves are harmless but optional.
+webapp/ui/node_modules
 Dockerfile
 docker-compose.yml
