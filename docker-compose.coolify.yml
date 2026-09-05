@@ -1,0 +1,42 @@
+# Deploy compose used by the Coolify "Trading Agents" application (source build).
+#
+# Coolify clones this repo, builds ./Dockerfile and runs only the `webapp`
+# service behind https://trading.krlosim.com — Coolify's proxy handles routing
+# and TLS (container port 8000; nothing is published to the host). Local
+# development keeps using docker-compose.yml instead; this file exists solely
+# for the Coolify-managed deployment.
+#
+# Nothing secret lives in this (public) repo: every value is interpolated from
+# the Coolify application's Environment Variables at deploy time. A missing
+# required var fails the deploy loudly instead of booting a broken container.
+
+services:
+  webapp:
+    build: .
+    container_name: tradingagents-webapp
+    environment:
+      - SECRET_KEY=${SECRET_KEY:?set SECRET_KEY in the Coolify app env}
+      - OIDC_ISSUER=${OIDC_ISSUER:?set OIDC_ISSUER in the Coolify app env}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID:?set OIDC_CLIENT_ID in the Coolify app env}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET:?set OIDC_CLIENT_SECRET in the Coolify app env}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:?set OIDC_REDIRECT_URI in the Coolify app env}
+      - FRED_API_KEY=${FRED_API_KEY:?set FRED_API_KEY in the Coolify app env}
+    volumes:
+      # Same volume names the old ghcr.io image deployment used, so any
+      # existing data carries over. app/data is where the SQLite DB lives
+      # (webapp/database.py → <repo root>/data/trading.db).
+      - tradingagents-data:/home/appuser/.tradingagents
+      - tradingagents-webapp-data:/home/appuser/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  tradingagents-data:
+    name: tradingagents-data
+  tradingagents-webapp-data:
+    name: tradingagents-webapp-data
