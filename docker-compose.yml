@@ -1,60 +1,43 @@
+# Deployment compose — builds this repo's Dockerfile and runs the webapp.
+#
+# This is the single compose file of the repo. `docker compose up --build`
+# builds from source (no prebuilt image to push) and serves the webapp on
+# port 8000. The same file is used by Coolify-like deployments: Coolify's
+# proxy handles routing/TLS, so nothing is published to the host there.
+#
+# This repo is PUBLIC and must never contain real credentials. Every value
+# below is interpolated from the environment (a local `.env` file or the
+# deployment's env vars, e.g. Coolify "Environment Variables").
+# Required vars: SECRET_KEY, OIDC_ISSUER, OIDC_CLIENT_ID, OIDC_CLIENT_SECRET,
+# OIDC_REDIRECT_URI, FRED_API_KEY — copy .env.example and fill them in.
+
 services:
-  # Webapp — FastAPI + MD3 frontend (default)
   webapp:
     build: .
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/data
-
-  # CLI mode — interactive terminal
-  tradingagents:
-    build: .
-    entrypoint: ["tradingagents"]
-    env_file:
-      - .env
-    volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/data
-    tty: true
-    stdin_open: true
-    profiles:
-      - cli
-
-  # Ollama (optional local LLM)
-  ollama:
-    image: ollama/ollama:latest
-    volumes:
-      - ollama_data:/root/.ollama
-    profiles:
-      - ollama
-
-  # CLI with Ollama backend
-  tradingagents-ollama:
-    build: .
-    entrypoint: ["tradingagents"]
-    env_file:
-      - .env
+    container_name: tradingagents-webapp
     environment:
-      - TRADINGAGENTS_LLM_PROVIDER=ollama
-      - OLLAMA_BASE_URL=http://ollama:11434/v1
+      - SECRET_KEY=${SECRET_KEY}
+      - OIDC_ISSUER=${OIDC_ISSUER}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI}
+      - FRED_API_KEY=${FRED_API_KEY}
     volumes:
-      - tradingagents_data:/home/appuser/.tradingagents
-      - webapp_data:/home/appuser/app/data
-    depends_on:
-      - ollama
-    tty: true
-    stdin_open: true
-    profiles:
-      - ollama
+      # app/data is where the SQLite DB lives (webapp/database.py →
+      # <repo root>/data/trading.db). Volume names are explicit so data
+      # survives container recreation under any compose project name.
+      - tradingagents-data:/home/appuser/.tradingagents
+      - tradingagents-webapp-data:/home/appuser/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
 
 volumes:
-  tradingagents_data:
-  ollama_data:
-  webapp_data:
-    profiles:
-      - ollama
-
+  tradingagents-data:
+    name: tradingagents-data
+  tradingagents-webapp-data:
+    name: tradingagents-webapp-data

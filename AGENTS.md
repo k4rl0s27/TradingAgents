@@ -13,8 +13,8 @@ Personal fork of [TauricResearch/TradingAgents](https://github.com/TauricResearc
 ## Commands
 
 - Install dev deps: `pip install -e ".[dev]"` (Python >=3.10). `pip install -r requirements.txt` is the alternative.
-- Run webapp: `python -m uvicorn webapp.main:app --reload` **from the repo root** (also `docker compose up webapp`). Docker default entrypoint is the webapp on :8000.
-- Coolify deployment: the Coolify "Trading Agents" app builds this repo's `Dockerfile` from `docker-compose.coolify.yml` (source build — no GHCR image to push). That compose interpolates all env vars from the Coolify app's Environment Variables; never commit real values into this public repo.
+- Run webapp: `python -m uvicorn webapp.main:app --reload` **from the repo root** (also `docker compose up webapp` — `docker-compose.yml` builds from source; env vars interpolate from the local `.env`). Docker default entrypoint is the webapp on :8000.
+- Deployments (e.g. Coolify) use the same `docker-compose.yml`: it builds the `Dockerfile` from source (no image to push) and interpolates every value from the deployment env (e.g. the Coolify app's Environment Variables). This repo is **public** — never commit real credentials.
 - UI dev server: from `webapp/ui`: `npm install`, then `npm run dev` (Vite on :5173, proxies `/api` + `/auth` to :8000 — keep the uvicorn backend running). **OIDC in dev**: `OIDC_REDIRECT_URI` must point at `http://localhost:5173/auth/callback`; simplest local dev is `WEBAPP_DEV_AUTOLOGIN=1` with OIDC unset.
 - UI production build: from `webapp/ui`: `npm run build` → wipes and rewrites `webapp/static` (**commit the result** — pip/Docker serve it without Node). UI lint: `npm run lint` (oxlint; warnings tolerated, keep zero errors).
 - Adding shadcn components: `npx shadcn@latest add <name>` — the CLI writes to a literal `@/` folder at `webapp/ui` root (it does not resolve the tsconfig alias); move files into `src/components/ui/`.
