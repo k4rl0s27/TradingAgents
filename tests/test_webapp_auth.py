@@ -6,6 +6,9 @@ against a throwaway SQLite file.
 
 from __future__ import annotations
 
+import asyncio
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -53,3 +56,33 @@ def test_dev_autologin_disabled_when_oidc_configured(app, monkeypatch):
         # Even with the env var set, an unauthenticated request is rejected once
         # OIDC is configured — the fallback must never bypass real auth.
         assert client.get("/auth/me").status_code == 401
+
+
+def test_login_challenge_reused_while_pending(monkeypatch):
+    """Duplicate /auth/login hits share one state + PKCE verifier.
+
+    The SPA probes /auth/login on load and the user then clicks "Sign in"; if
+    each hit regenerated the challenge, the later one would overwrite the pair
+    the Authentik round-trip is using and the callback would 400 with an
+    invalid state. A pending (unexpired) challenge must therefore be reused.
+    """
+
+    async def fake_discovery() -> dict:
+        return {"authorization_endpoint": "https://idp.example/oauth/authorize"}
+
+    monkeypatch.setattr(auth_module, "_fetch_discovery", fake_discovery)
+
+    session: dict = {}
+    url1, state1 = asyncio.run(auth_module.start_login(session))
+    assert state1
+    assert url1.startswith("https://idp.example/oauth/authorize")
+
+    # A second /auth/login within the TTL reuses the same challenge.
+    url2, state2 = asyncio.run(auth_module.start_login(session))
+    assert state2 == state1
+    assert url2 == url1
+
+    # Once the challenge has expired, the next login gets a fresh one.
+    session["oidc_pending_at"] = time.time() - auth_module._PENDING_TTL_SECONDS - 1
+    _, state3 = asyncio.run(auth_module.start_login(session))
+    assert state3 != state1

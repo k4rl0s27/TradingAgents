@@ -6,14 +6,15 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from ..auth import (
     exchange_code,
-    get_authorization_url_simple,
     is_configured,
+    start_login,
 )
 from ..services.user_service import get_user_by_sub, upsert_user
 
@@ -84,11 +85,9 @@ async def login(request: Request):
     if not is_configured():
         raise HTTPException(status_code=501, detail="OIDC is not configured")
 
-    auth_url, code_verifier, state = await get_authorization_url_simple()
-
-    # Stash PKCE verifier + state in session
-    request.session["oidc_code_verifier"] = code_verifier
-    request.session["oidc_state"] = state
+    # start_login stashes (and reuses) the PKCE verifier + state in the session,
+    # so duplicate /auth/login hits can't overwrite the challenge mid-flight.
+    auth_url, _ = await start_login(request.session)
 
     return RedirectResponse(url=auth_url, status_code=302)
 
@@ -99,12 +98,19 @@ async def callback(request: Request, code: str = "", state: str = ""):
     if not is_configured():
         raise HTTPException(status_code=501, detail="OIDC is not configured")
 
-    # Verify state to prevent CSRF
-    expected_state = request.session.pop("oidc_state", None)
-    if not expected_state or expected_state != state:
+    # Verify state to prevent CSRF. Kept (not popped) so a duplicate callback
+    # for the same challenge — e.g. two tabs finishing the same login — can
+    # never consume the verifier out from under the legitimate one.
+    expected_state = request.session.get("oidc_state")
+    if not expected_state or not secrets.compare_digest(expected_state, state):
+        logger.warning(
+            "OIDC callback rejected: state mismatch (cookie=%r, query=%r)",
+            expected_state,
+            state,
+        )
         raise HTTPException(status_code=400, detail="Invalid state parameter")
 
-    code_verifier = request.session.pop("oidc_code_verifier", None)
+    code_verifier = request.session.get("oidc_code_verifier")
     if not code_verifier:
         raise HTTPException(status_code=400, detail="Missing PKCE verifier")
 
@@ -132,6 +138,10 @@ async def callback(request: Request, code: str = "", state: str = ""):
         "email": email,
         "name": name,
     }
+    # Login challenge is spent — clear it now that the session is established.
+    request.session.pop("oidc_state", None)
+    request.session.pop("oidc_code_verifier", None)
+    request.session.pop("oidc_pending_at", None)
 
     logger.info("User %s (id=%d) logged in, initialized=%s", sub, user["id"], user["is_initialized"])
 

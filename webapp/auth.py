@@ -16,6 +16,7 @@ import hashlib
 import logging
 import os
 import secrets
+import time
 from urllib.parse import urlencode
 
 import httpx
@@ -72,39 +73,60 @@ async def _fetch_jwks() -> dict:
 
 # ── PKCE helpers ──────────────────────────────────────────────────────────────
 
-def _generate_pkce_pair() -> tuple[str, str]:
-    """Generate a PKCE code_verifier and code_challenge (S256)."""
-    code_verifier = secrets.token_urlsafe(64)
-    digest = hashlib.sha256(code_verifier.encode()).digest()
+# How long an unused login challenge may sit in the session between
+# /auth/login and /auth/callback before it is regenerated.
+_PENDING_TTL_SECONDS = 15 * 60
+
+
+def _code_challenge(verifier: str) -> str:
+    """Compute the S256 PKCE code_challenge for a code_verifier (RFC 7636)."""
+    digest = hashlib.sha256(verifier.encode()).digest()
     # Base64url-encode without padding (per RFC 7636 Appendix A)
-    code_challenge = (
-        __import__("base64").urlsafe_b64encode(digest).rstrip(b"=").decode()
-    )
-    return code_verifier, code_challenge
+    return __import__("base64").urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def get_authorization_url() -> tuple[str, str]:
-    """Build the Authentik authorization URL with PKCE.
+async def start_login(session: dict) -> tuple[str, str]:
+    """Create (or reuse) the PKCE login challenge and store it in the session.
 
-    Returns (url, code_verifier).  The caller must stash code_verifier in the
-    session so it's available in the callback.
+    Returns ``(authorization_url, state)``.  The ``state``/``code_verifier``
+    pair is stashed in ``session`` and **reused** for ``_PENDING_TTL_SECONDS``
+    if ``/auth/login`` is hit again (the SPA probes the endpoint on load, then
+    the user clicks "Sign in" — and some setups fire the endpoint twice in
+    quick succession).  Regenerating the pair on every hit lets a later
+    request overwrite the challenge of the one Authentik actually honored,
+    so the callback then fails with ``400 Invalid state parameter``.
     """
+    now = time.time()
+    created_at = session.get("oidc_pending_at", 0)
+    pending = (
+        session.get("oidc_state")
+        and session.get("oidc_code_verifier")
+        and now - created_at < _PENDING_TTL_SECONDS
+    )
+    if pending:
+        state = session["oidc_state"]
+        code_verifier = session["oidc_code_verifier"]
+    else:
+        state = secrets.token_urlsafe(32)
+        code_verifier = secrets.token_urlsafe(64)
+        session["oidc_state"] = state
+        session["oidc_code_verifier"] = code_verifier
+        session["oidc_pending_at"] = now
+
     disco = await _fetch_discovery()
-    code_verifier, code_challenge = _generate_pkce_pair()
-    state = secrets.token_urlsafe(32)
     params = {
         "response_type": "code",
         "client_id": _OIDC_CLIENT_ID,
         "redirect_uri": _OIDC_REDIRECT_URI,
         "scope": _OIDC_SCOPES,
         "state": state,
-        "code_challenge": code_challenge,
+        "code_challenge": _code_challenge(code_verifier),
         "code_challenge_method": "S256",
     }
     auth_url = f"{disco['authorization_endpoint']}?{urlencode(params)}"
-    return auth_url, code_verifier
+    return auth_url, state
 
 
 async def exchange_code(code: str, code_verifier: str) -> dict:
@@ -174,21 +196,3 @@ async def validate_id_token(token: str) -> dict:
 
     logger.debug("Validated id_token for sub=%s", claims.get("sub"))
     return claims
-
-
-async def get_authorization_url_simple() -> tuple[str, str, str]:
-    """Build the authorization URL and return (url, code_verifier, state)."""
-    disco = await _fetch_discovery()
-    code_verifier, code_challenge = _generate_pkce_pair()
-    state = secrets.token_urlsafe(32)
-    params = {
-        "response_type": "code",
-        "client_id": _OIDC_CLIENT_ID,
-        "redirect_uri": _OIDC_REDIRECT_URI,
-        "scope": _OIDC_SCOPES,
-        "state": state,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
-    }
-    auth_url = f"{disco['authorization_endpoint']}?{urlencode(params)}"
-    return auth_url, code_verifier, state
