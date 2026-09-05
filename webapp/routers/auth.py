@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import logging
 import os
-import secrets
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
@@ -14,6 +13,7 @@ from fastapi.responses import RedirectResponse
 from ..auth import (
     exchange_code,
     is_configured,
+    resolve_login,
     start_login,
 )
 from ..services.user_service import get_user_by_sub, upsert_user
@@ -80,14 +80,15 @@ async def get_current_user(request: Request) -> dict:
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("/login")
-async def login(request: Request):
+async def login():
     """Redirect to the OIDC provider for authentication."""
     if not is_configured():
         raise HTTPException(status_code=501, detail="OIDC is not configured")
 
-    # start_login stashes (and reuses) the PKCE verifier + state in the session,
-    # so duplicate /auth/login hits can't overwrite the challenge mid-flight.
-    auth_url, _ = await start_login(request.session)
+    # Challenges are registered server-side (auth.start_login), so racing
+    # duplicate /auth/login hits — SPA probe + navigation — can't overwrite
+    # each other's state in a cookie mid-flight.
+    auth_url, _ = await start_login()
 
     return RedirectResponse(url=auth_url, status_code=302)
 
@@ -98,21 +99,13 @@ async def callback(request: Request, code: str = "", state: str = ""):
     if not is_configured():
         raise HTTPException(status_code=501, detail="OIDC is not configured")
 
-    # Verify state to prevent CSRF. Kept (not popped) so a duplicate callback
-    # for the same challenge — e.g. two tabs finishing the same login — can
-    # never consume the verifier out from under the legitimate one.
-    expected_state = request.session.get("oidc_state")
-    if not expected_state or not secrets.compare_digest(expected_state, state):
-        logger.warning(
-            "OIDC callback rejected: state mismatch (cookie=%r, query=%r)",
-            expected_state,
-            state,
-        )
-        raise HTTPException(status_code=400, detail="Invalid state parameter")
-
-    code_verifier = request.session.get("oidc_code_verifier")
+    # The state must match a challenge this server handed out (server-side
+    # store, not the session cookie — see auth.start_login). A stale or
+    # replayed callback bounces back to the app instead of showing raw JSON.
+    code_verifier = await resolve_login(state)
     if not code_verifier:
-        raise HTTPException(status_code=400, detail="Missing PKCE verifier")
+        logger.warning("OIDC callback rejected: unknown or expired state (query=%r)", state)
+        return RedirectResponse(url="/", status_code=302)
 
     # Exchange code for tokens
     try:
@@ -138,10 +131,6 @@ async def callback(request: Request, code: str = "", state: str = ""):
         "email": email,
         "name": name,
     }
-    # Login challenge is spent — clear it now that the session is established.
-    request.session.pop("oidc_state", None)
-    request.session.pop("oidc_code_verifier", None)
-    request.session.pop("oidc_pending_at", None)
 
     logger.info("User %s (id=%d) logged in, initialized=%s", sub, user["id"], user["is_initialized"])
 

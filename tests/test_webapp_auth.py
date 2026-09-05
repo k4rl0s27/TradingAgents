@@ -58,13 +58,13 @@ def test_dev_autologin_disabled_when_oidc_configured(app, monkeypatch):
         assert client.get("/auth/me").status_code == 401
 
 
-def test_login_challenge_reused_while_pending(monkeypatch):
-    """Duplicate /auth/login hits share one state + PKCE verifier.
+def test_login_challenge_resolved_server_side(monkeypatch):
+    """Each /auth/login gets its own challenge; the callback resolves it.
 
-    The SPA probes /auth/login on load and the user then clicks "Sign in"; if
-    each hit regenerated the challenge, the later one would overwrite the pair
-    the Authentik round-trip is using and the callback would 400 with an
-    invalid state. A pending (unexpired) challenge must therefore be reused.
+    The SPA probes /auth/login and auto-redirects to it in quick succession,
+    so two concurrent requests must not clobber each other — challenges are
+    stored server-side keyed by state, and only the state Authentik honors
+    can complete. Unknown, replayed or expired states resolve to None.
     """
 
     async def fake_discovery() -> dict:
@@ -72,17 +72,24 @@ def test_login_challenge_reused_while_pending(monkeypatch):
 
     monkeypatch.setattr(auth_module, "_fetch_discovery", fake_discovery)
 
-    session: dict = {}
-    url1, state1 = asyncio.run(auth_module.start_login(session))
-    assert state1
+    # Two racing /auth/login calls: both succeed with their own states.
+    url1, state1 = asyncio.run(auth_module.start_login())
+    url2, state2 = asyncio.run(auth_module.start_login())
+    assert state1 != state2
     assert url1.startswith("https://idp.example/oauth/authorize")
 
-    # A second /auth/login within the TTL reuses the same challenge.
-    url2, state2 = asyncio.run(auth_module.start_login(session))
-    assert state2 == state1
-    assert url2 == url1
+    # The callback for either one resolves to the matching verifier.
+    verifier1 = asyncio.run(auth_module.resolve_login(state1))
+    assert verifier1
+    assert asyncio.run(auth_module.resolve_login(state2))
 
-    # Once the challenge has expired, the next login gets a fresh one.
-    session["oidc_pending_at"] = time.time() - auth_module._PENDING_TTL_SECONDS - 1
-    _, state3 = asyncio.run(auth_module.start_login(session))
-    assert state3 != state1
+    # A state can complete only once (no replay).
+    assert asyncio.run(auth_module.resolve_login(state1)) is None
+    # Unknown states are rejected.
+    assert asyncio.run(auth_module.resolve_login("bogus-state")) is None
+
+    # Expired challenges are rejected.
+    _, state3 = asyncio.run(auth_module.start_login())
+    entry = auth_module._pending_login[state3]
+    auth_module._pending_login[state3] = (entry[0], time.time() - 1)
+    assert asyncio.run(auth_module.resolve_login(state3)) is None

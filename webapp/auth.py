@@ -73,9 +73,25 @@ async def _fetch_jwks() -> dict:
 
 # ── PKCE helpers ──────────────────────────────────────────────────────────────
 
-# How long an unused login challenge may sit in the session between
-# /auth/login and /auth/callback before it is regenerated.
+# Pending login challenges live SERVER-SIDE, keyed by the unguessable `state`
+# (not in the session cookie): the SPA probes /auth/login and auto-redirects
+# to it in quick succession, so two concurrent requests race and the cookie
+# that reaches /auth/callback may hold the state of a *different* request
+# than the one Authentik honored. Transporting the challenge in the cookie
+# then guarantees a state mismatch. A per-process dict sidesteps the cookie
+# entirely — fine for the single uvicorn worker this image runs; if the app
+# ever scales to multiple workers, move this to a shared store.
+_pending_login: dict[str, tuple[str, float]] = {}  # state -> (code_verifier, expires_at)
+
+# How long a login challenge stays valid between /auth/login and /auth/callback.
 _PENDING_TTL_SECONDS = 15 * 60
+
+
+def _purge_expired_logins() -> None:
+    now = time.time()
+    for state, (_, expires_at) in list(_pending_login.items()):
+        if expires_at < now:
+            del _pending_login[state]
 
 
 def _code_challenge(verifier: str) -> str:
@@ -87,33 +103,19 @@ def _code_challenge(verifier: str) -> str:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-async def start_login(session: dict) -> tuple[str, str]:
-    """Create (or reuse) the PKCE login challenge and store it in the session.
+async def start_login() -> tuple[str, str]:
+    """Create a PKCE login challenge and register it server-side.
 
-    Returns ``(authorization_url, state)``.  The ``state``/``code_verifier``
-    pair is stashed in ``session`` and **reused** for ``_PENDING_TTL_SECONDS``
-    if ``/auth/login`` is hit again (the SPA probes the endpoint on load, then
-    the user clicks "Sign in" — and some setups fire the endpoint twice in
-    quick succession).  Regenerating the pair on every hit lets a later
-    request overwrite the challenge of the one Authentik actually honored,
-    so the callback then fails with ``400 Invalid state parameter``.
+    Returns ``(authorization_url, state)``. The ``code_verifier`` for the
+    ``state`` is kept in ``_pending_login`` until ``resolve_login`` consumes
+    it (or the TTL expires), so concurrent duplicate ``/auth/login`` requests
+    can each get their own state and the callback still resolves no matter
+    which one Authentik honors — no session-cookie round-trip involved.
     """
-    now = time.time()
-    created_at = session.get("oidc_pending_at", 0)
-    pending = (
-        session.get("oidc_state")
-        and session.get("oidc_code_verifier")
-        and now - created_at < _PENDING_TTL_SECONDS
-    )
-    if pending:
-        state = session["oidc_state"]
-        code_verifier = session["oidc_code_verifier"]
-    else:
-        state = secrets.token_urlsafe(32)
-        code_verifier = secrets.token_urlsafe(64)
-        session["oidc_state"] = state
-        session["oidc_code_verifier"] = code_verifier
-        session["oidc_pending_at"] = now
+    _purge_expired_logins()
+    state = secrets.token_urlsafe(32)
+    code_verifier = secrets.token_urlsafe(64)
+    _pending_login[state] = (code_verifier, time.time() + _PENDING_TTL_SECONDS)
 
     disco = await _fetch_discovery()
     params = {
@@ -127,6 +129,21 @@ async def start_login(session: dict) -> tuple[str, str]:
     }
     auth_url = f"{disco['authorization_endpoint']}?{urlencode(params)}"
     return auth_url, state
+
+
+async def resolve_login(state: str) -> str | None:
+    """Consume a pending login challenge; returns its code_verifier or None.
+
+    The entry is removed on lookup so a given state can complete at most one
+    callback (a replay of the same callback then fails cleanly).
+    """
+    entry = _pending_login.pop(state, None)
+    if not entry:
+        return None
+    code_verifier, expires_at = entry
+    if expires_at < time.time():
+        return None
+    return code_verifier
 
 
 async def exchange_code(code: str, code_verifier: str) -> dict:
